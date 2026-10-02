@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+/* Class on <html>, not the operating system, so Settings can switch the theme. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f1f5f9;
+  --foreground: #0f172a;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #0b1220;
+  --foreground: #e2e8f0;
+  color-scheme: dark;
+}
+
+/* Shared page colors follow the toggle. The navy header and left nav stay put. */
+.dark .bg-slate-100 { background-color: #0b1220; }
+.dark .bg-white { background-color: #111827; }
+.dark .bg-slate-50 { background-color: #1e293b; }
+.dark .text-slate-900 { color: #f1f5f9; }
+.dark .text-slate-800 { color: #e2e8f0; }
+.dark .text-slate-700 { color: #cbd5e1; }
+.dark .text-slate-600 { color: #94a3b8; }
+.dark .text-slate-500 { color: #94a3b8; }
+.dark .border-slate-200 { border-color: #334155; }
+.dark .border-slate-100 { border-color: #1e293b; }
+.dark .border-slate-300 { border-color: #475569; }
+.dark .bg-amber-50 { background-color: #422006; }
+.dark .border-amber-200 { border-color: #92400e; }
+.dark .text-amber-950 { color: #fef3c7; }
+.dark .text-red-700 { color: #fca5a5; }
+.dark .hover\:bg-slate-50:hover { background-color: #1e293b; }
+.dark .even\:bg-slate-100:nth-child(even) { background-color: #1e293b; }
+.dark .bg-red-50 { background-color: #3f1d24; }
+.dark .hover\:bg-red-100:hover { background-color: #4c242c; }
+.dark .border-red-200 { border-color: #7f1d1d; }
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-outfit);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+h1 {
+  font-family: var(--font-outfit), var(--font-sans), sans-serif;
+  letter-spacing: -0.03em;
+}
+
+/* Slight grow and shadow for icons and compact buttons. */
+.hover-lift {
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.hover-lift:hover:not(:disabled) {
+  transform: scale(1.08);
+  box-shadow: 0 8px 18px rgb(15 23 42 / 0.18);
+}
+
+.hover-raise {
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.hover-raise:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgb(15 23 42 / 0.14);
+}
