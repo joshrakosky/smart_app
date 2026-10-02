@@ -12,22 +12,29 @@ import { STAKEHOLDERS } from "@/lib/stakeholders";
 import {
   applyBulkEdit,
   baseBreak,
-  EXTRA_TYPE_LABELS,
   formatGpmPercent,
   getPricesServerSnapshot,
   getPricesSnapshot,
   gpmDollars,
   gpmPercent,
-  hasPriceExtras,
   PRICE_TYPE_LABELS,
   PRICE_TYPES,
   replacePrices,
   sortBreaks,
   subscribePrices,
   type BulkPriceEdit,
+  type ExtraType,
   type Price,
   type PriceType,
 } from "@/lib/prices";
+
+// Short names for the hover panel. The form dropdown keeps the longer billing hint.
+const EXTRA_TIP_LABELS: Record<ExtraType, { name: string; hint: string }> = {
+  setup: { name: "Setup", hint: "once per order" },
+  run: { name: "Run", hint: "per qty" },
+  shipping: { name: "Shipping", hint: "once" },
+  kitting: { name: "Kitting", hint: "each" },
+};
 
 // Price-table buttons lighten on hover. No drop shadow.
 const navyButton =
@@ -73,6 +80,8 @@ export function PriceTable() {
   const [formSession, setFormSession] = useState(0);
   const [editing, setEditing] = useState<Price | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  // One hover panel for the whole table, so wholesale and retail never stack.
+  const [openTip, setOpenTip] = useState<{ id: string; side: "wholesale" | "retail" } | null>(null);
 
   const filtered = prices.filter((price) => {
     if (!showInactive && !price.active) return false;
@@ -94,12 +103,14 @@ export function PriceTable() {
   const bulkEnabled = selectedCount >= 2;
 
   function openAdd() {
+    setOpenTip(null);
     setEditing(null);
     setFormSession((current) => current + 1);
     setFormOpen(true);
   }
 
   function openEdit(price: Price) {
+    setOpenTip(null);
     setEditing(price);
     setFormSession((current) => current + 1);
     setFormOpen(true);
@@ -114,11 +125,6 @@ export function PriceTable() {
   function importPrices(imported: Price[]) {
     if (imported.length === 0) return;
     replacePrices([...prices, ...imported]);
-  }
-
-  function removePrice(price: Price) {
-    if (!window.confirm(`Delete ${price.name}?`)) return;
-    replacePrices(prices.filter((item) => item.id !== price.id));
   }
 
   function toggleSelected(id: string) {
@@ -269,7 +275,7 @@ export function PriceTable() {
           <h2 className="text-base font-semibold">Prices</h2>
         </div>
         {/* Own scroll box so the header can stick, same as orders. */}
-        <div className="h-[416px] overflow-auto">
+        <div className="h-[416px] overflow-auto" onScroll={() => setOpenTip(null)}>
         <table className="w-full min-w-[56rem] border-separate border-spacing-0 text-center text-sm">
           <thead className="text-slate-600">
             <tr>
@@ -282,13 +288,12 @@ export function PriceTable() {
               <th className={priceHeaderCell}>Retail</th>
               <th className={priceHeaderCell}>GPM</th>
               <th className={priceHeaderCell}>GPM %</th>
-              <th className={priceHeaderCell}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-slate-500" colSpan={8}>
+                <td className="px-4 py-6 text-slate-500" colSpan={7}>
                   {emptyLabel(query, typeFilter, accountUnitName, stakeholderName, showInactive)}
                 </td>
               </tr>
@@ -306,27 +311,46 @@ export function PriceTable() {
                         className="h-4 w-4"
                       />
                     </td>
-                    <td className={priceCell}>{price.name}</td>
+                    <td className={priceCell}>
+                      {/* Name opens edit. A listing leaves the list by going inactive, not by delete. */}
+                      <button
+                        type="button"
+                        onClick={() => openEdit(price)}
+                        className="font-medium text-[#0f2c4c] underline-offset-2 hover:underline"
+                      >
+                        {price.name}
+                      </button>
+                    </td>
                     <td className={`${priceCell} whitespace-nowrap`}>{price.sku}</td>
                     <td className={priceCell}>
-                      <PriceAmount price={price} side="wholesale" />
+                      <PriceAmount
+                        price={price}
+                        side="wholesale"
+                        open={openTip?.id === price.id && openTip.side === "wholesale"}
+                        onOpen={() => setOpenTip({ id: price.id, side: "wholesale" })}
+                        onClose={() =>
+                          setOpenTip((current) =>
+                            current?.id === price.id && current.side === "wholesale" ? null : current,
+                          )
+                        }
+                      />
                     </td>
                     <td className={priceCell}>
-                      <PriceAmount price={price} side="retail" />
+                      <PriceAmount
+                        price={price}
+                        side="retail"
+                        open={openTip?.id === price.id && openTip.side === "retail"}
+                        onOpen={() => setOpenTip({ id: price.id, side: "retail" })}
+                        onClose={() =>
+                          setOpenTip((current) =>
+                            current?.id === price.id && current.side === "retail" ? null : current,
+                          )
+                        }
+                      />
                     </td>
                     <td className={`${priceCell} tabular-nums`}>{formatMoney(gpmDollars(base.wholesale, base.retail))}</td>
                     <td className={`${priceCell} tabular-nums`}>
                       {formatGpmPercent(gpmPercent(base.wholesale, base.retail))}
-                    </td>
-                    <td className={priceCell}>
-                      <div className="flex justify-center gap-1">
-                        <IconButton label={`Edit ${price.name}`} onClick={() => openEdit(price)}>
-                          <PencilIcon />
-                        </IconButton>
-                        <IconButton label={`Delete ${price.name}`} onClick={() => removePrice(price)}>
-                          <TrashIcon />
-                        </IconButton>
-                      </div>
                     </td>
                   </tr>
                 );
@@ -442,13 +466,24 @@ function priceScope(typeName: string, accountUnitName: string, stakeholderName: 
   return label;
 }
 
-// The cell shows the lowest quantity. A dotted price means breaks or extra charges are on hover.
-function PriceAmount({ price, side }: { price: Price; side: "wholesale" | "retail" }) {
+// The cell shows the lowest quantity. Hover either price for every break and extra.
+function PriceAmount({
+  price,
+  side,
+  open,
+  onOpen,
+  onClose,
+}: {
+  price: Price;
+  side: "wholesale" | "retail";
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
   const base = baseBreak(price);
   const value = formatMoney(side === "wholesale" ? base.wholesale : base.retail);
-  if (!hasPriceExtras(price)) return <span className="tabular-nums">{value}</span>;
   return (
-    <ExtraTip price={price} side={side}>
+    <ExtraTip price={price} side={side} open={open} onOpen={onOpen} onClose={onClose}>
       {value}
     </ExtraTip>
   );
@@ -457,24 +492,20 @@ function PriceAmount({ price, side }: { price: Price; side: "wholesale" | "retai
 function ExtraTip({
   price,
   side,
+  open,
+  onOpen,
+  onClose,
   children,
 }: {
   price: Price;
   side: "wholesale" | "retail";
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
   children: ReactNode;
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const [place, setPlace] = useState<{ top: number; left: number; above: boolean } | null>(null);
-
-  function show() {
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const width = 240;
-    const left = Math.min(Math.max(rect.left + rect.width / 2, width / 2 + 8), window.innerWidth - width / 2 - 8);
-    const above = rect.bottom + 220 > window.innerHeight && rect.top > 160;
-    setPlace({ top: above ? rect.top - 8 : rect.bottom + 8, left, above });
-  }
-
+  const place = open ? tipPlace(buttonRef.current) : null;
   const sideLabel = side === "wholesale" ? "Wholesale" : "Retail";
 
   return (
@@ -484,10 +515,10 @@ function ExtraTip({
         type="button"
         className="tabular-nums underline decoration-dotted decoration-slate-400 underline-offset-4"
         aria-label={`${sideLabel} details for ${price.name}`}
-        onMouseEnter={show}
-        onMouseLeave={() => setPlace(null)}
-        onFocus={show}
-        onBlur={() => setPlace(null)}
+        onMouseEnter={onOpen}
+        onMouseLeave={onClose}
+        onFocus={onOpen}
+        onBlur={onClose}
       >
         {children}
       </button>
@@ -499,7 +530,7 @@ function ExtraTip({
             left: place.left,
             transform: place.above ? "translate(-50%, -100%)" : "translate(-50%, 0)",
           }}
-          className="fixed z-50 w-72 rounded-lg border border-slate-200 bg-white p-3 text-left text-xs text-slate-700 shadow-lg"
+          className="pointer-events-none fixed z-50 w-80 rounded-lg border border-slate-200 bg-white p-3 text-left text-xs text-slate-700 shadow-lg"
         >
           <TipBody price={price} side={side} />
         </div>
@@ -508,47 +539,112 @@ function ExtraTip({
   );
 }
 
-function TipBody({ price, side }: { price: Price; side: "wholesale" | "retail" }) {
-  const amount = (pair: { wholesale: number; retail: number }) =>
-    side === "wholesale" ? pair.wholesale : pair.retail;
+// Anchor the panel to the price that opened it. The panel itself ignores the pointer so it cannot cover the next row.
+function tipPlace(button: HTMLButtonElement | null): { top: number; left: number; above: boolean } | null {
+  const rect = button?.getBoundingClientRect();
+  if (!rect) return null;
+  const width = 320;
+  const left = Math.min(Math.max(rect.left + rect.width / 2, width / 2 + 8), window.innerWidth - width / 2 - 8);
+  const above = rect.bottom + 220 > window.innerHeight && rect.top > 160;
+  return { top: above ? rect.top - 8 : rect.bottom + 8, left, above };
+}
 
+function TipBody({ price, side }: { price: Price; side: "wholesale" | "retail" }) {
   return (
-    <div className="flex flex-col gap-2">
-      <div>
-        <p className="mb-1 font-medium text-slate-900">Quantity breaks</p>
-        <ul>
-          {sortBreaks(price.breaks).map((item) => (
-            <li key={item.qty} className="flex justify-between gap-3 tabular-nums">
-              <span>{item.qty}</span>
-              <span>{formatMoney(amount(item))}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-      {price.extras.length > 0 ? (
-        <ul>
-          {price.extras.map((item, index) => (
-            <li key={`${item.type}-${index}`} className="flex justify-between gap-3 tabular-nums">
-              <span>{EXTRA_TYPE_LABELS[item.type]}</span>
-              <span>{formatMoney(amount(item))}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+    <div className="flex flex-col gap-3">
+      <TipSection title="Quantity breaks">
+        <TipTable
+          labelHeader="Qty"
+          side={side}
+          rows={sortBreaks(price.breaks).map((item) => ({
+            key: String(item.qty),
+            label: String(item.qty),
+            wholesale: formatMoney(item.wholesale),
+            retail: formatMoney(item.retail),
+          }))}
+        />
+      </TipSection>
+      <TipSection title="Extras">
+        {price.extras.length === 0 ? (
+          <p className="text-slate-400">None</p>
+        ) : (
+          <TipTable
+            labelHeader="Charge"
+            side={side}
+            rows={price.extras.map((item, index) => {
+              const label = EXTRA_TIP_LABELS[item.type];
+              return {
+                key: `${item.type}-${index}`,
+                label: label.name,
+                hint: label.hint,
+                wholesale: formatMoney(item.wholesale),
+                retail: formatMoney(item.retail),
+              };
+            })}
+          />
+        )}
+      </TipSection>
       {price.sizeUpcharges.length > 0 ? (
-        <div>
-          <p className="mb-1 font-medium text-slate-900">Bigger sizes, per piece</p>
-          <ul>
-            {price.sizeUpcharges.map((item) => (
-              <li key={item.size} className="flex justify-between gap-3 tabular-nums">
-                <span>{item.size}</span>
-                <span>+{formatMoney(amount(item))}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <TipSection title="Bigger sizes, per piece">
+          <TipTable
+            labelHeader="Size"
+            side={side}
+            rows={price.sizeUpcharges.map((item) => ({
+              key: item.size,
+              label: item.size,
+              wholesale: `+${formatMoney(item.wholesale)}`,
+              retail: `+${formatMoney(item.retail)}`,
+            }))}
+          />
+        </TipSection>
       ) : null}
     </div>
+  );
+}
+
+function TipSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</p>
+      {children}
+    </section>
+  );
+}
+
+function TipTable({
+  labelHeader,
+  side,
+  rows,
+}: {
+  labelHeader: string;
+  side: "wholesale" | "retail";
+  rows: { key: string; label: string; hint?: string; wholesale: string; retail: string }[];
+}) {
+  const money = "px-1.5 py-1 text-right font-normal tabular-nums";
+  const hot = "rounded bg-slate-100 font-medium text-slate-900";
+
+  return (
+    <table className="w-full border-separate border-spacing-0">
+      <thead>
+        <tr className="text-[11px] text-slate-500">
+          <th className="pb-1 text-left font-medium">{labelHeader}</th>
+          <th className={`pb-1 text-right font-medium ${side === "wholesale" ? "text-slate-900" : ""}`}>Wholesale</th>
+          <th className={`pb-1 text-right font-medium ${side === "retail" ? "text-slate-900" : ""}`}>Retail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.key} className="border-t border-slate-100">
+            <td className="border-t border-slate-100 py-1 pr-2 text-left text-slate-800">
+              {row.label}
+              {row.hint ? <span className="ml-1.5 text-slate-400">· {row.hint}</span> : null}
+            </td>
+            <td className={`border-t border-slate-100 ${money} ${side === "wholesale" ? hot : ""}`}>{row.wholesale}</td>
+            <td className={`border-t border-slate-100 ${money} ${side === "retail" ? hot : ""}`}>{row.retail}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -586,27 +682,6 @@ function Field({
   );
 }
 
-function IconButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={onClick}
-      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-100 hover:text-[#0f2c4c]"
-    >
-      {children}
-    </button>
-  );
-}
-
 function InactiveIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -625,10 +700,3 @@ function PencilIcon() {
   );
 }
 
-function TrashIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M5 7h14M9 7V5h6v2M8 7l1 12h6l1-12" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-    </svg>
-  );
-}

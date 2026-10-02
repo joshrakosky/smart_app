@@ -179,11 +179,6 @@ export function baseBreak(price: Price): QtyBreak {
   return sortBreaks(price.breaks)[0] ?? { qty: 1, wholesale: 0, retail: 0 };
 }
 
-// True when hover should explain more than the single base price.
-export function hasPriceExtras(price: Price): boolean {
-  return price.breaks.length > 1 || price.extras.length > 0 || price.sizeUpcharges.length > 0;
-}
-
 // GPM dollars = retail − wholesale.
 export function gpmDollars(wholesale: number, retail: number): number {
   return fromCents(toCents(retail) - toCents(wholesale));
