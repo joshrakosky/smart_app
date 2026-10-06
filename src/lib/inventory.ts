@@ -1,8 +1,8 @@
 import type { Brand } from "@/lib/brands";
 
 // Sample on-hand stock until inventory has a database table.
-// Reorder points are the only field saved in this browser. Changing one can
-// move a product between In Stock and Low Stock.
+// Reorder points, product notes, and the production-order flag are saved in this browser.
+// Changing a reorder point can move a product between In Stock and Low Stock.
 // Status rules, first match wins:
 //   balance < 0  Backorder
 //   balance = 0  Out of Stock
@@ -23,7 +23,8 @@ export const INVENTORY_STATUSES: { id: InventoryStatus; label: string; hint: str
   { id: "out", label: "Out of Stock", hint: "Balance is zero" },
 ];
 
-export type InventoryItem = {
+// Live date stays on the record for Avg/M. It is not a table column.
+type InventorySeed = {
   id: string;
   product: string;
   sku: string;
@@ -36,7 +37,13 @@ export type InventoryItem = {
   ytdUsage: number;
 };
 
-export const SEED_INVENTORY: InventoryItem[] = [
+// Notes and the production-order flag are saved in this browser, like the reorder point.
+export type InventoryItem = InventorySeed & {
+  notes: string;
+  productionOrdered: boolean;
+};
+
+export const SEED_INVENTORY: InventorySeed[] = [
   { id: "inv-brochure", product: "Trane Brochure", sku: "BR-8PG", stakeholderId: 1, brand: "Trane", liveOn: "2024-03-15", balance: 2400, reorder: 500, totalUsage: 18000, ytdUsage: 5400 },
   { id: "inv-poster", product: "Dealer Poster", sku: "PS-2436", stakeholderId: 1, brand: "Trane", liveOn: "2025-06-01", balance: 40, reorder: 80, totalUsage: 800, ytdUsage: 240 },
   { id: "inv-binder", product: "Spec Binder", sku: "SB-BIND", stakeholderId: 1, brand: "Trane", liveOn: "2023-01-10", balance: 900, reorder: 200, totalUsage: 7200, ytdUsage: 1600 },
@@ -52,6 +59,8 @@ export const SEED_INVENTORY: InventoryItem[] = [
 ];
 
 const STORAGE_KEY = "smart-inventory-reorders";
+const NOTES_KEY = "smart-inventory-notes";
+const ORDERS_KEY = "smart-inventory-orders";
 
 let cachedItems: InventoryItem[] | null = null;
 const itemListeners = new Set<() => void>();
@@ -67,7 +76,7 @@ export function getInventorySnapshot(): InventoryItem[] {
 }
 
 export function getInventoryServerSnapshot(): InventoryItem[] {
-  return SEED_INVENTORY;
+  return SEED_INVENTORY.map((item) => decorate(item, "", false));
 }
 
 export function inventoryStatus(item: Pick<InventoryItem, "balance" | "reorder">): InventoryStatus {
@@ -115,14 +124,49 @@ export function setInventoryReorder(id: string, reorder: number) {
     if (seed && seed.reorder !== item.reorder) overrides[item.id] = item.reorder;
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+  notifyInventory();
+}
+
+// Stays on until clicked again, so a low or out row can show that restock was already ordered.
+export function setProductionOrdered(id: string, ordered: boolean) {
+  const next = getInventorySnapshot().map((item) => (item.id === id ? { ...item, productionOrdered: ordered } : item));
+  cachedItems = next;
+  const flags: Record<string, true> = {};
+  for (const item of next) {
+    if (item.productionOrdered) flags[item.id] = true;
+  }
+  localStorage.setItem(ORDERS_KEY, JSON.stringify(flags));
+  notifyInventory();
+}
+
+export function setInventoryNotes(id: string, notes: string) {
+  const text = notes.trim();
+  const next = getInventorySnapshot().map((item) => (item.id === id ? { ...item, notes: text } : item));
+  cachedItems = next;
+  const saved: Record<string, string> = {};
+  for (const item of next) {
+    if (item.notes) saved[item.id] = item.notes;
+  }
+  localStorage.setItem(NOTES_KEY, JSON.stringify(saved));
+  notifyInventory();
+}
+
+function notifyInventory() {
   for (const listener of itemListeners) listener();
+}
+
+function decorate(item: InventorySeed, notes: string, productionOrdered: boolean): InventoryItem {
+  return { ...item, notes, productionOrdered };
 }
 
 function loadInventory(): InventoryItem[] {
   const overrides = readOverrides();
+  const notes = readNotes();
+  const orders = readOrders();
   return SEED_INVENTORY.map((item) => {
     const reorder = overrides[item.id];
-    return reorder == null ? item : { ...item, reorder };
+    const row = reorder == null ? item : { ...item, reorder };
+    return decorate(row, notes[item.id] ?? "", orders.has(item.id));
   });
 }
 
@@ -141,6 +185,35 @@ function readOverrides(): Record<string, number> {
       }
     }
     return overrides;
+  } catch {
+    return {};
+  }
+}
+
+function readNotes(): Record<string, string> {
+  const parsed = readRecord(NOTES_KEY);
+  const notes: Record<string, string> = {};
+  for (const [id, value] of Object.entries(parsed)) {
+    if (typeof value === "string" && value.trim() && SEED_INVENTORY.some((item) => item.id === id)) {
+      notes[id] = value.trim();
+    }
+  }
+  return notes;
+}
+
+function readOrders(): Set<string> {
+  const parsed = readRecord(ORDERS_KEY);
+  return new Set(Object.keys(parsed).filter((id) => parsed[id] === true && SEED_INVENTORY.some((item) => item.id === id)));
+}
+
+function readRecord(key: string): Record<string, unknown> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as Record<string, unknown>;
   } catch {
     return {};
   }

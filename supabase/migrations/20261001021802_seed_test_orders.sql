@@ -5,10 +5,10 @@
 insert into public.stakeholders (id, name)
 overriding system value
 values
-  (1, 'Stakeholder 1'),
-  (2, 'Stakeholder 2'),
-  (3, 'Stakeholder 3'),
-  (4, 'Stakeholder 4');
+  (1, 'MarCom'),
+  (2, 'Tours'),
+  (3, 'FSR'),
+  (4, 'Elite Dealer Service');
 
 select setval(pg_get_serial_sequence('public.stakeholders', 'id'), 4, true);
 

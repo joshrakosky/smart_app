@@ -1,13 +1,13 @@
-// Placeholder owners. Same four people as the sample orders.
+// Product / order owners. Ids stay 1–4 so existing local rows keep their links.
 export const STAKEHOLDERS = [
-  { id: 1, name: "Stakeholder 1" },
-  { id: 2, name: "Stakeholder 2" },
-  { id: 3, name: "Stakeholder 3" },
-  { id: 4, name: "Stakeholder 4" },
+  { id: 1, name: "MarCom" },
+  { id: 2, name: "Tours" },
+  { id: 3, name: "FSR" },
+  { id: 4, name: "Elite Dealer Service" },
 ] as const;
 
 export function stakeholderName(id: number): string {
-  return STAKEHOLDERS.find((stakeholder) => stakeholder.id === id)?.name ?? "Stakeholder 1";
+  return STAKEHOLDERS.find((stakeholder) => stakeholder.id === id)?.name ?? "MarCom";
 }
 
 export function parseStakeholderId(value: unknown): number {

@@ -18,7 +18,7 @@ export const IMPORTS: { id: ImportId; label: string; detail: string }[] = [
   },
   {
     id: "prices",
-    label: "Price tables",
+    label: "Products",
     detail: "Name, wholesale, and retail. Added as Print at quantity 1.",
   },
   {
@@ -29,9 +29,9 @@ export const IMPORTS: { id: ImportId; label: string; detail: string }[] = [
 ];
 
 const ORDER_TEMPLATE =
-  "Order,Date,Product,SKU,Stakeholder,Brand,Qty,Print cost,Wholesale,Retail,Fee rate\nORD-1000,2026-10-01,Sample brochure,SM-001,Stakeholder 1,Trane,10,1.00,2.00,3.00,0.03\n";
+  "Order,Date,Product,SKU,Stakeholder,Brand,Qty,Print cost,Wholesale,Retail,Fee rate\nORD-1000,2026-10-01,Sample brochure,SM-001,MarCom,Trane,10,1.00,2.00,3.00,0.03\n";
 
-const UNIT_TEMPLATE = "Name,Stakeholder,Margin\nSample unit,Stakeholder 1,30\n";
+const UNIT_TEMPLATE = "Name,Stakeholder,Margin\nSample unit,MarCom,30\n";
 
 export function downloadImportTemplate(id: ImportId) {
   const file = new Blob([templateCsv(id)], { type: "text/csv" });

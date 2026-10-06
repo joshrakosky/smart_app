@@ -16,7 +16,7 @@ create table public.stakeholders (
 );
 
 comment on table public.stakeholders is
-  'Budget owners. v1 uses Stakeholder 1–4 as placeholders.';
+  'Budget owners. v1: MarCom, Tours, FSR, Elite Dealer Service.';
 
 create table public.products (
   id bigint generated always as identity primary key,

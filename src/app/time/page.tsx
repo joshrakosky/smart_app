@@ -8,11 +8,7 @@ export const metadata = {
 export default function TimePage() {
   return (
     <div className="min-h-full bg-slate-100 text-slate-900">
-      <PageHeader
-        title="Hours"
-        eyebrow="Trane Technologies"
-        subtitle="Projects and the combined time contractors have on each one."
-      />
+      <PageHeader title="Hours" />
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
         <TimeClock />
       </main>

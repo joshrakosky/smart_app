@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { PageHeader } from "@/components/page-header";
+import { ProductNotes } from "@/components/product-notes";
 import { BRANDS, type Brand } from "@/lib/brands";
 import {
   INVENTORY_STATUSES,
@@ -12,17 +13,22 @@ import {
   getInventoryServerSnapshot,
   getInventorySnapshot,
   inventoryStatus,
+  setInventoryNotes,
   setInventoryReorder,
+  setProductionOrdered,
   subscribeInventory,
   type InventoryItem,
   type InventoryStatus,
 } from "@/lib/inventory";
 import { inventoryHref } from "@/lib/inventory-query";
-import { formatSlashDate } from "@/lib/money";
 import { STAKEHOLDERS } from "@/lib/stakeholders";
 
 const fieldClass =
   "h-10 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 text-base text-slate-900 shadow-sm";
+const iconButton =
+  "flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-100 hover:text-[#0f2c4c]";
+const iconButtonOn =
+  "flex h-8 w-8 items-center justify-center rounded-lg border border-[#0f2c4c] bg-[#0f2c4c] text-white";
 const headerCell =
   "sticky top-0 z-10 whitespace-nowrap border-r border-b border-slate-200 bg-slate-50 px-4 py-2.5 font-medium last:border-r-0";
 const bodyCell = "border-r border-b border-slate-200 px-4 py-2.5 last:border-r-0";
@@ -71,11 +77,7 @@ export function InventoryBoard({
 
   return (
     <div className="min-h-full bg-slate-100 text-slate-900">
-      <PageHeader
-        title="Inventory"
-        eyebrow="Trane Technologies"
-        subtitle="On-hand balance, usage since the live date, and how many months the current stock should last."
-      />
+      <PageHeader title="Inventory" />
 
       <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -138,12 +140,12 @@ export function InventoryBoard({
               <thead className="text-slate-600">
                 <tr>
                   <th className={headerCell}>Product</th>
-                  <th className={headerCell}>Live Date</th>
                   <th className={headerCell}>SKU</th>
                   <th className={headerCell}>Balance</th>
                   <th className={headerCell}>Reorder</th>
                   <th className={headerCell}>Total</th>
                   <th className={headerCell}>Proj/M</th>
+                  <th className={headerCell}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -227,6 +229,7 @@ function FilterSelect({
 function InventoryRow({ item, today }: { item: InventoryItem; today: Date }) {
   const [draft, setDraft] = useState(String(item.reorder));
   const [editing, setEditing] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
 
   useEffect(() => {
     setDraft(String(item.reorder));
@@ -251,7 +254,6 @@ function InventoryRow({ item, today }: { item: InventoryItem; today: Date }) {
   return (
     <tr className="even:bg-slate-100">
       <td className={bodyCell}>{item.product}</td>
-      <td className={`${bodyCell} whitespace-nowrap tabular-nums`}>{formatSlashDate(item.liveOn)}</td>
       <td className={`${bodyCell} whitespace-nowrap`}>{item.sku}</td>
       <td className={`${bodyCell} tabular-nums`}>{formatCount(item.balance)}</td>
       <td className={bodyCell}>
@@ -275,6 +277,35 @@ function InventoryRow({ item, today }: { item: InventoryItem; today: Date }) {
         <span className={previewing ? "font-medium text-[#0f2c4c]" : undefined}>
           {projected == null ? "—" : formatMonths(projected)}
         </span>
+      </td>
+      <td className={bodyCell}>
+        <div className="flex items-center justify-center gap-1">
+          <button
+            type="button"
+            aria-label={`Notes for ${item.product}`}
+            onClick={() => setNotesOpen(true)}
+            className={item.notes ? iconButtonOn : iconButton}
+          >
+            <NotesIcon />
+          </button>
+          <button
+            type="button"
+            aria-label={`Production order for ${item.product}`}
+            aria-pressed={item.productionOrdered}
+            onClick={() => setProductionOrdered(item.id, !item.productionOrdered)}
+            className={item.productionOrdered ? iconButtonOn : iconButton}
+          >
+            <ProductionOrderIcon />
+          </button>
+        </div>
+        {notesOpen ? (
+          <ProductNotes
+            product={item.product}
+            notes={item.notes}
+            onClose={() => setNotesOpen(false)}
+            onSave={(notes) => setInventoryNotes(item.id, notes)}
+          />
+        ) : null}
       </td>
     </tr>
   );
@@ -361,4 +392,25 @@ function formatAverage(value: number): string {
 
 function formatMonths(value: number): string {
   return value.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+function NotesIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M7 3.5h7.2L19 8.2V20.5H7V3.5Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M14.2 3.5V8.2H19" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M10 12.2h6M10 16h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ProductionOrderIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 20v-4h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M20 4v4h-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }

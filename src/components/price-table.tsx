@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { PriceFormDialog } from "@/components/price-form-dialog";
+import { enqueueOnboarding, queueKindForSave } from "@/lib/onboarding";
 import {
   getAccountUnitsServerSnapshot,
   getAccountUnitsSnapshot,
@@ -10,6 +11,8 @@ import {
 import { formatMoney } from "@/lib/money";
 import { STAKEHOLDERS } from "@/lib/stakeholders";
 import {
+  APPAREL_SIZES,
+  apparelUpchargeRows,
   applyBulkEdit,
   baseBreak,
   formatGpmPercent,
@@ -19,14 +22,21 @@ import {
   gpmPercent,
   PRICE_TYPE_LABELS,
   PRICE_TYPES,
+  PRODUCT_CATEGORIES,
   replacePrices,
   sortBreaks,
   subscribePrices,
+  type ApparelSize,
   type BulkPriceEdit,
   type ExtraType,
   type Price,
   type PriceType,
+  type ProductCategory,
+  type SizeUpcharge,
 } from "@/lib/prices";
+
+type ChargeSide = "wholesale" | "retail";
+type ChargeView = { price: Price; side: ChargeSide };
 
 // Short names for the hover panel. The form dropdown keeps the longer billing hint.
 const EXTRA_TIP_LABELS: Record<ExtraType, { name: string; hint: string }> = {
@@ -48,7 +58,7 @@ const inactiveToggleOn =
 const fieldClass = "h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900";
 // Same cell borders as the orders table.
 const priceHeaderCell =
-  "sticky top-0 z-10 whitespace-nowrap border-r border-b border-slate-200 bg-slate-50 px-4 py-2.5 font-medium last:border-r-0";
+  "sticky top-0 z-10 whitespace-nowrap border-r border-b border-slate-200 bg-slate-50 px-4 py-2.5 font-semibold text-slate-800 last:border-r-0";
 const priceCell = "border-r border-b border-slate-200 px-4 py-2.5 last:border-r-0";
 
 type TypeFilter = "all" | PriceType;
@@ -68,6 +78,8 @@ export function PriceTable() {
   const [accountUnitFilter, setAccountUnitFilter] = useState("all");
   // Owner is a filter, same as Type and AU. It is not a column.
   const [stakeholderFilter, setStakeholderFilter] = useState("all");
+  // Sits beside stakeholder. Narrows the list, and is not a table column.
+  const [categoryFilter, setCategoryFilter] = useState<"all" | ProductCategory>("all");
   // Inactive rows stay hidden until this is on. It adds them to the list; it does not filter to only them.
   const [showInactive, setShowInactive] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
@@ -80,14 +92,15 @@ export function PriceTable() {
   const [formSession, setFormSession] = useState(0);
   const [editing, setEditing] = useState<Price | null>(null);
   const [formOpen, setFormOpen] = useState(false);
-  // One hover panel for the whole table, so wholesale and retail never stack.
-  const [openTip, setOpenTip] = useState<{ id: string; side: "wholesale" | "retail" } | null>(null);
+  // Clicking wholesale or retail opens that side's charge breakdown.
+  const [charges, setCharges] = useState<ChargeView | null>(null);
 
   const filtered = prices.filter((price) => {
     if (!showInactive && !price.active) return false;
     if (typeFilter !== "all" && price.type !== typeFilter) return false;
     if (accountUnitFilter !== "all" && price.accountUnitId !== accountUnitFilter) return false;
     if (stakeholderFilter !== "all" && String(price.stakeholderId) !== stakeholderFilter) return false;
+    if (categoryFilter !== "all" && price.category !== categoryFilter) return false;
     const needle = query.trim().toLowerCase();
     return price.name.toLowerCase().includes(needle) || price.sku.toLowerCase().includes(needle);
   });
@@ -103,22 +116,22 @@ export function PriceTable() {
   const bulkEnabled = selectedCount >= 2;
 
   function openAdd() {
-    setOpenTip(null);
     setEditing(null);
     setFormSession((current) => current + 1);
     setFormOpen(true);
   }
 
   function openEdit(price: Price) {
-    setOpenTip(null);
     setEditing(price);
     setFormSession((current) => current + 1);
     setFormOpen(true);
   }
 
-  function savePrice(next: Price) {
-    const exists = prices.some((price) => price.id === next.id);
-    replacePrices(exists ? prices.map((price) => (price.id === next.id ? next : price)) : [...prices, next]);
+  function savePrice(next: Price, queue: boolean) {
+    const previous = prices.find((price) => price.id === next.id);
+    replacePrices(previous ? prices.map((price) => (price.id === next.id ? next : price)) : [...prices, next]);
+    // The prompt already decided. A second save of an open row updates that row.
+    if (queue) enqueueOnboarding(next, queueKindForSave(previous, next));
     setFormOpen(false);
   }
 
@@ -198,8 +211,8 @@ export function PriceTable() {
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search prices"
-            aria-label="Search prices"
+            placeholder="Search products"
+            aria-label="Search products"
             className={`${fieldClass} w-full sm:w-64`}
           />
           <select
@@ -244,6 +257,20 @@ export function PriceTable() {
               </option>
             ))}
           </select>
+          <select
+            id="price-category-filter"
+            aria-label="Category"
+            value={categoryFilter}
+            onChange={(event) => setCategoryFilter(event.target.value as "all" | ProductCategory)}
+            className={`${fieldClass} w-full text-sm sm:w-40`}
+          >
+            <option value="all">All categories</option>
+            {PRODUCT_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="flex items-center gap-2 self-end">
           <button
@@ -259,25 +286,22 @@ export function PriceTable() {
             type="button"
             onClick={() => setShowInactive((current) => !current)}
             aria-pressed={showInactive}
-            aria-label="Show inactive prices"
+            aria-label="Show inactive products"
             className={showInactive ? inactiveToggleOn : toolButton}
           >
             <InactiveIcon />
           </button>
-          <button type="button" onClick={openAdd} aria-label="Add price" className={addButton}>
+          <button type="button" onClick={openAdd} aria-label="Add product" className={addButton}>
             +
           </button>
         </div>
       </div>
 
-      <section aria-label="Prices" className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 px-4 py-3">
-          <h2 className="text-base font-semibold">Prices</h2>
-        </div>
-        {/* Own scroll box so the header can stick, same as orders. */}
-        <div className="h-[416px] overflow-auto" onScroll={() => setOpenTip(null)}>
+      <section aria-label="Products" className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        {/* Own scroll box so the header can stick. Page title lives in the top nav. */}
+        <div className="h-[416px] overflow-auto">
         <table className="w-full min-w-[56rem] border-separate border-spacing-0 text-center text-sm">
-          <thead className="text-slate-600">
+          <thead>
             <tr>
               <th className={priceHeaderCell}>
                 <span className="sr-only">Select</span>
@@ -294,7 +318,7 @@ export function PriceTable() {
             {filtered.length === 0 ? (
               <tr>
                 <td className="px-4 py-6 text-slate-500" colSpan={7}>
-                  {emptyLabel(query, typeFilter, accountUnitName, stakeholderName, showInactive)}
+                  {emptyLabel(query, typeFilter, accountUnitName, stakeholderName, categoryFilter === "all" ? "" : categoryFilter, showInactive)}
                 </td>
               </tr>
             ) : (
@@ -323,29 +347,13 @@ export function PriceTable() {
                     </td>
                     <td className={`${priceCell} whitespace-nowrap`}>{price.sku}</td>
                     <td className={priceCell}>
-                      <PriceAmount
-                        price={price}
-                        side="wholesale"
-                        open={openTip?.id === price.id && openTip.side === "wholesale"}
-                        onOpen={() => setOpenTip({ id: price.id, side: "wholesale" })}
-                        onClose={() =>
-                          setOpenTip((current) =>
-                            current?.id === price.id && current.side === "wholesale" ? null : current,
-                          )
-                        }
-                      />
+                      <ChargeButton price={price} onOpen={() => setCharges({ price, side: "wholesale" })} />
                     </td>
                     <td className={priceCell}>
-                      <PriceAmount
+                      <ChargeButton
                         price={price}
                         side="retail"
-                        open={openTip?.id === price.id && openTip.side === "retail"}
-                        onOpen={() => setOpenTip({ id: price.id, side: "retail" })}
-                        onClose={() =>
-                          setOpenTip((current) =>
-                            current?.id === price.id && current.side === "retail" ? null : current,
-                          )
-                        }
+                        onOpen={() => setCharges({ price, side: "retail" })}
                       />
                     </td>
                     <td className={`${priceCell} tabular-nums`}>{formatMoney(gpmDollars(base.wholesale, base.retail))}</td>
@@ -360,6 +368,20 @@ export function PriceTable() {
         </table>
         </div>
       </section>
+
+      {charges ? (
+        <ChargeDialog
+          price={prices.find((item) => item.id === charges.price.id) ?? charges.price}
+          side={charges.side}
+          onClose={() => setCharges(null)}
+          onSizeUpcharges={(sizeUpcharges) => {
+            const next = prices.map((item) =>
+              item.id === charges.price.id ? { ...item, sizeUpcharges } : item,
+            );
+            replacePrices(next);
+          }}
+        />
+      ) : null}
 
       {formOpen ? (
         <PriceFormDialog
@@ -416,7 +438,7 @@ export function PriceTable() {
         ) : (
           <div className="flex flex-col gap-4 p-5">
             <h2 className="text-lg font-semibold">Confirm update</h2>
-            <p className="text-sm text-slate-700">You are going to update {selectedCount} price tables.</p>
+            <p className="text-sm text-slate-700">You are going to update {selectedCount} products.</p>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -445,167 +467,210 @@ function emptyLabel(
   typeFilter: TypeFilter,
   accountUnitName: string,
   stakeholderName: string,
+  categoryName: string,
   showInactive: boolean,
 ): string {
   const typeName = typeFilter === "all" ? "" : PRICE_TYPE_LABELS[typeFilter];
-  const scope = priceScope(typeName, accountUnitName, stakeholderName);
+  const scope = priceScope(typeName, accountUnitName, stakeholderName, categoryName);
   const searching = query.trim().length > 0;
   if (searching && scope) return `No ${scope} match that search.`;
-  if (searching) return "No prices match that search.";
-  if (scope && !showInactive) return `No active ${scope}. Show inactive prices to see the rest.`;
+  if (searching) return "No products match that search.";
+  if (scope && !showInactive) return `No active ${scope}. Show inactive products to see the rest.`;
   if (scope) return `No ${scope}.`;
-  if (showInactive) return "No prices yet.";
-  return "No active prices. Show inactive prices to see the rest.";
+  if (showInactive) return "No products yet.";
+  return "No active products. Show inactive products to see the rest.";
 }
 
-function priceScope(typeName: string, accountUnitName: string, stakeholderName: string): string {
-  if (!typeName && !accountUnitName && !stakeholderName) return "";
-  let label = typeName ? `${typeName} prices` : "prices";
+function priceScope(
+  typeName: string,
+  accountUnitName: string,
+  stakeholderName: string,
+  categoryName: string,
+): string {
+  if (!typeName && !accountUnitName && !stakeholderName && !categoryName) return "";
+  let label = typeName ? `${typeName} products` : "products";
+  if (categoryName) label += ` in ${categoryName}`;
   if (accountUnitName) label += ` in ${accountUnitName}`;
   if (stakeholderName) label += ` for ${stakeholderName}`;
   return label;
 }
 
-// The cell shows the lowest quantity. Hover either price for every break and extra.
-function PriceAmount({
+// The cell shows the lowest quantity. A click opens that side's charge breakdown.
+function ChargeButton({
   price,
-  side,
-  open,
+  side = "wholesale",
   onOpen,
-  onClose,
 }: {
   price: Price;
-  side: "wholesale" | "retail";
-  open: boolean;
+  side?: ChargeSide;
   onOpen: () => void;
-  onClose: () => void;
 }) {
   const base = baseBreak(price);
   const value = formatMoney(side === "wholesale" ? base.wholesale : base.retail);
+  const sideLabel = side === "wholesale" ? "Wholesale" : "Retail";
   return (
-    <ExtraTip price={price} side={side} open={open} onOpen={onOpen} onClose={onClose}>
+    <button
+      type="button"
+      onClick={onOpen}
+      className="tabular-nums text-[#0f2c4c] underline-offset-2 hover:underline"
+      aria-label={`${sideLabel} charges for ${price.name}`}
+    >
       {value}
-    </ExtraTip>
+    </button>
   );
 }
 
-function ExtraTip({
+// Wholesale pricing vs Retail — same sections, one money column for the side that opened it.
+function ChargeDialog({
   price,
   side,
-  open,
-  onOpen,
   onClose,
-  children,
+  onSizeUpcharges,
 }: {
   price: Price;
-  side: "wholesale" | "retail";
-  open: boolean;
-  onOpen: () => void;
+  side: ChargeSide;
   onClose: () => void;
-  children: ReactNode;
+  onSizeUpcharges: (next: SizeUpcharge[]) => void;
 }) {
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const place = open ? tipPlace(buttonRef.current) : null;
-  const sideLabel = side === "wholesale" ? "Wholesale" : "Retail";
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const title = side === "wholesale" ? "Wholesale pricing" : "Retail";
+  const amountHeader = side === "wholesale" ? "Wholesale" : "Retail";
+  const showUpcharges = price.type === "apparel" || price.sizeUpcharges.length > 0;
+  const upchargeRows = apparelUpchargeRows(price);
+  const allLive = upchargeRows.every((row) => row.active);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    dialog.showModal();
+    return () => dialog.close();
+  }, []);
+
+  function moneyFor(item: { wholesale: number; retail: number }, prefix = "") {
+    const value = side === "wholesale" ? item.wholesale : item.retail;
+    return `${prefix}${formatMoney(value)}`;
+  }
+
+  // Keep inactive sizes in storage too so amounts stick when toggled back on.
+  function writeUpcharges(rows: SizeUpcharge[]) {
+    onSizeUpcharges(rows.filter((row) => row.active || row.wholesale > 0 || row.retail > 0));
+  }
+
+  function toggleSize(size: ApparelSize, active: boolean) {
+    const next = upchargeRows.map((row) => (row.size === size ? { ...row, active } : row));
+    writeUpcharges(next);
+  }
+
+  function toggleAll(active: boolean) {
+    writeUpcharges(upchargeRows.map((row) => ({ ...row, active })));
+  }
 
   return (
-    <>
-      <button
-        ref={buttonRef}
-        type="button"
-        className="tabular-nums underline decoration-dotted decoration-slate-400 underline-offset-4"
-        aria-label={`${sideLabel} details for ${price.name}`}
-        onMouseEnter={onOpen}
-        onMouseLeave={onClose}
-        onFocus={onOpen}
-        onBlur={onClose}
-      >
-        {children}
-      </button>
-      {place ? (
-        <div
-          role="tooltip"
-          style={{
-            top: place.top,
-            left: place.left,
-            transform: place.above ? "translate(-50%, -100%)" : "translate(-50%, 0)",
-          }}
-          className="pointer-events-none fixed z-50 w-80 rounded-lg border border-slate-200 bg-white p-3 text-left text-xs text-slate-700 shadow-lg"
-        >
-          <TipBody price={price} side={side} />
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="charge-dialog-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-lg backdrop:bg-slate-900/40"
+    >
+      <div className="flex flex-col gap-4 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 id="charge-dialog-title" className="text-lg font-semibold">
+              {title}
+            </h2>
+            <p className="text-sm text-slate-500">{price.name}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="text-xl leading-none text-slate-500">
+            ×
+          </button>
         </div>
-      ) : null}
-    </>
-  );
-}
-
-// Anchor the panel to the price that opened it. The panel itself ignores the pointer so it cannot cover the next row.
-function tipPlace(button: HTMLButtonElement | null): { top: number; left: number; above: boolean } | null {
-  const rect = button?.getBoundingClientRect();
-  if (!rect) return null;
-  const width = 320;
-  const left = Math.min(Math.max(rect.left + rect.width / 2, width / 2 + 8), window.innerWidth - width / 2 - 8);
-  const above = rect.bottom + 220 > window.innerHeight && rect.top > 160;
-  return { top: above ? rect.top - 8 : rect.bottom + 8, left, above };
-}
-
-function TipBody({ price, side }: { price: Price; side: "wholesale" | "retail" }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <TipSection title="Quantity breaks">
-        <TipTable
-          labelHeader="Qty"
-          side={side}
-          rows={sortBreaks(price.breaks).map((item) => ({
-            key: String(item.qty),
-            label: String(item.qty),
-            wholesale: formatMoney(item.wholesale),
-            retail: formatMoney(item.retail),
-          }))}
-        />
-      </TipSection>
-      <TipSection title="Extras">
-        {price.extras.length === 0 ? (
-          <p className="text-slate-400">None</p>
-        ) : (
+        <TipSection title="Quantity breaks">
           <TipTable
-            labelHeader="Charge"
-            side={side}
-            rows={price.extras.map((item, index) => {
-              const label = EXTRA_TIP_LABELS[item.type];
-              return {
-                key: `${item.type}-${index}`,
-                label: label.name,
-                hint: label.hint,
-                wholesale: formatMoney(item.wholesale),
-                retail: formatMoney(item.retail),
-              };
-            })}
-          />
-        )}
-      </TipSection>
-      {price.sizeUpcharges.length > 0 ? (
-        <TipSection title="Bigger sizes, per piece">
-          <TipTable
-            labelHeader="Size"
-            side={side}
-            rows={price.sizeUpcharges.map((item) => ({
-              key: item.size,
-              label: item.size,
-              wholesale: `+${formatMoney(item.wholesale)}`,
-              retail: `+${formatMoney(item.retail)}`,
+            labelHeader="Qty"
+            amountHeader={amountHeader}
+            rows={sortBreaks(price.breaks).map((item) => ({
+              key: String(item.qty),
+              label: String(item.qty),
+              amount: moneyFor(item),
             }))}
           />
         </TipSection>
-      ) : null}
-    </div>
+        <TipSection title="Extras">
+          {price.extras.length === 0 ? (
+            <p className="text-center text-sm text-slate-400">None</p>
+          ) : (
+            <TipTable
+              labelHeader="Charge"
+              amountHeader={amountHeader}
+              rows={price.extras.map((item, index) => {
+                const label = EXTRA_TIP_LABELS[item.type];
+                return {
+                  key: `${item.type}-${index}`,
+                  label: label.name,
+                  hint: label.hint,
+                  amount: moneyFor(item),
+                };
+              })}
+            />
+          )}
+        </TipSection>
+        {showUpcharges ? (
+          <TipSection title="Upcharges">
+            <div className="mb-2 flex items-center justify-center gap-2 text-sm">
+              <input
+                id={`upcharge-all-${price.id}`}
+                type="checkbox"
+                checked={allLive}
+                onChange={(event) => toggleAll(event.target.checked)}
+                className="h-4 w-4"
+              />
+              <label htmlFor={`upcharge-all-${price.id}`} className="font-medium text-slate-700">
+                Check all
+              </label>
+            </div>
+            <table className="w-full border-separate border-spacing-0 text-center text-sm">
+              <thead>
+                <tr className="text-slate-500">
+                  <th className="pb-1 font-medium">Live</th>
+                  <th className="pb-1 font-medium">Size</th>
+                  <th className="pb-1 font-medium">{amountHeader}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {upchargeRows.map((row) => (
+                  <tr key={row.size}>
+                    <td className="border-t border-slate-100 py-1.5">
+                      <input
+                        type="checkbox"
+                        checked={row.active}
+                        onChange={(event) => toggleSize(row.size, event.target.checked)}
+                        aria-label={`${row.size} upcharge live`}
+                        className="h-4 w-4"
+                      />
+                    </td>
+                    <td className="border-t border-slate-100 py-1.5 text-slate-800">{row.size}</td>
+                    <td className="border-t border-slate-100 py-1.5 tabular-nums">+{moneyFor(row)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {price.type !== "apparel" && price.sizeUpcharges.length === 0 ? null : (
+              <p className="mt-1.5 text-center text-xs text-slate-400">Per piece · {APPAREL_SIZES.join(", ")}</p>
+            )}
+          </TipSection>
+        ) : null}
+      </div>
+    </dialog>
   );
 }
 
 function TipSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
-      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</p>
+      <p className="mb-1.5 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</p>
       {children}
     </section>
   );
@@ -613,34 +678,29 @@ function TipSection({ title, children }: { title: string; children: ReactNode })
 
 function TipTable({
   labelHeader,
-  side,
+  amountHeader,
   rows,
 }: {
   labelHeader: string;
-  side: "wholesale" | "retail";
-  rows: { key: string; label: string; hint?: string; wholesale: string; retail: string }[];
+  amountHeader: string;
+  rows: { key: string; label: string; hint?: string; amount: string }[];
 }) {
-  const money = "px-1.5 py-1 text-right font-normal tabular-nums";
-  const hot = "rounded bg-slate-100 font-medium text-slate-900";
-
   return (
-    <table className="w-full border-separate border-spacing-0">
+    <table className="w-full border-separate border-spacing-0 text-center text-sm">
       <thead>
-        <tr className="text-[11px] text-slate-500">
-          <th className="pb-1 text-left font-medium">{labelHeader}</th>
-          <th className={`pb-1 text-right font-medium ${side === "wholesale" ? "text-slate-900" : ""}`}>Wholesale</th>
-          <th className={`pb-1 text-right font-medium ${side === "retail" ? "text-slate-900" : ""}`}>Retail</th>
+        <tr className="text-slate-500">
+          <th className="pb-1 font-medium">{labelHeader}</th>
+          <th className="pb-1 font-medium">{amountHeader}</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((row) => (
-          <tr key={row.key} className="border-t border-slate-100">
-            <td className="border-t border-slate-100 py-1 pr-2 text-left text-slate-800">
+          <tr key={row.key}>
+            <td className="border-t border-slate-100 py-1.5 text-slate-800">
               {row.label}
               {row.hint ? <span className="ml-1.5 text-slate-400">· {row.hint}</span> : null}
             </td>
-            <td className={`border-t border-slate-100 ${money} ${side === "wholesale" ? hot : ""}`}>{row.wholesale}</td>
-            <td className={`border-t border-slate-100 ${money} ${side === "retail" ? hot : ""}`}>{row.retail}</td>
+            <td className="border-t border-slate-100 py-1.5 tabular-nums">{row.amount}</td>
           </tr>
         ))}
       </tbody>

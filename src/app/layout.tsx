@@ -33,7 +33,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} ${outfit.variable} h-full antialiased`}
     >
-      <body className="min-h-full">
+      {/* Grammarly adds data attributes on body before hydrate. Ignore that mismatch. */}
+      <body className="min-h-full" suppressHydrationWarning>
         <script dangerouslySetInnerHTML={{ __html: themeBoot }} />
         <div className="flex min-h-full">
           <SideNav />

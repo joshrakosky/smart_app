@@ -20,10 +20,10 @@ type DemoOrder = {
 };
 
 const stakeholders: DemoStakeholder[] = [
-  { id: 1, name: "Stakeholder 1" },
-  { id: 2, name: "Stakeholder 2" },
-  { id: 3, name: "Stakeholder 3" },
-  { id: 4, name: "Stakeholder 4" },
+  { id: 1, name: "MarCom" },
+  { id: 2, name: "Tours" },
+  { id: 3, name: "FSR" },
+  { id: 4, name: "Elite Dealer Service" },
 ];
 
 const products: DemoProduct[] = [

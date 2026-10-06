@@ -62,11 +62,7 @@ export function Dashboard({
 
   return (
     <div className="min-h-full bg-slate-100 text-slate-900">
-      <PageHeader
-        title="Smart$"
-        eyebrow="Trane Technologies"
-        subtitle="Marketing collateral margin, after the card fee, allocated to the stakeholder who owns the product."
-      />
+      <PageHeader title="Smart$" />
 
       <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6">
         {/* Same five columns as the KPI cards so each filter sits on the card under it. */}

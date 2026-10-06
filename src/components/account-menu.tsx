@@ -32,10 +32,11 @@ export function AccountMenu() {
         onClick={() => setOpen((current) => !current)}
         className="hover-lift flex h-10 w-10 items-center justify-center rounded-lg text-white hover:bg-white/10"
       >
+        {/* bg-current (not bg-white): dark mode remaps .bg-white to charcoal */}
         <span className="flex flex-col gap-1.5" aria-hidden="true">
-          <span className="block h-0.5 w-5 bg-white" />
-          <span className="block h-0.5 w-5 bg-white" />
-          <span className="block h-0.5 w-5 bg-white" />
+          <span className="block h-0.5 w-5 bg-current" />
+          <span className="block h-0.5 w-5 bg-current" />
+          <span className="block h-0.5 w-5 bg-current" />
         </span>
       </button>
       {open ? (

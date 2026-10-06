@@ -17,6 +17,136 @@ export const PRICE_TYPE_LABELS: Record<PriceType, string> = {
   service: "Service",
 };
 
+// Starter categories for the product form and the toolbar filter. Not a table column.
+export const PRODUCT_CATEGORIES = ["Brochure", "Poster", "Literature", "Signage", "Mailer", "Apparel"] as const;
+
+export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
+
+// Spec chips follow product type. Color(s) allow more than one; other groups are single-pick.
+export type SpecGroup = {
+  id: string;
+  label: string;
+  tags: readonly string[];
+  multi?: boolean;
+};
+
+const SPEC_COLORS = [
+  "Black",
+  "White",
+  "Navy",
+  "Red",
+  "Green",
+  "Light Grey",
+  "Dark Grey",
+  "Yellow",
+  "Royal",
+] as const;
+
+// Soft fills for selected color chips — shaded, not neon.
+export const SPEC_COLOR_SWATCHES: Record<
+  (typeof SPEC_COLORS)[number],
+  { fill: string; text: string; border: string }
+> = {
+  Black: { fill: "#2a2a2a", text: "#f4f4f5", border: "#181818" },
+  White: { fill: "#f4f4f5", text: "#1e293b", border: "#c4c4c8" },
+  Navy: { fill: "#243b5c", text: "#f1f5f9", border: "#1a2d47" },
+  Red: { fill: "#b33b3b", text: "#fff7f7", border: "#8f2e2e" },
+  Green: { fill: "#2f6b45", text: "#f0fdf4", border: "#245436" },
+  "Light Grey": { fill: "#d1d5db", text: "#1e293b", border: "#9ca3af" },
+  "Dark Grey": { fill: "#4b5563", text: "#f8fafc", border: "#374151" },
+  Yellow: { fill: "#e4c04a", text: "#1e293b", border: "#b8962e" },
+  Royal: { fill: "#2f5fbe", text: "#f8fafc", border: "#244a96" },
+};
+
+export function specColorSwatch(tag: string): { fill: string; text: string; border: string } | null {
+  return tag in SPEC_COLOR_SWATCHES ? SPEC_COLOR_SWATCHES[tag as (typeof SPEC_COLORS)[number]] : null;
+}
+
+const PRINT_SPEC_GROUPS: SpecGroup[] = [
+  { id: "size", label: "Size", tags: ['8.5" x 11"', '11" x 17"', '3.5" x 2"'] },
+  { id: "orientation", label: "Orientation", tags: ["Standard", "Landscape"] },
+  { id: "pages", label: "Page count", tags: ["01p", "02p", "04p", "08p", "12p"] },
+  { id: "stock", label: "Stock", tags: ["80# Gloss Text", "100# Silk Text"] },
+  { id: "finishing", label: "Finishing", tags: ["Coil Bound", "Trifold", "Bifold"] },
+];
+
+const APPAREL_SPEC_GROUPS: SpecGroup[] = [
+  { id: "colors", label: "Color(s)", tags: SPEC_COLORS, multi: true },
+  {
+    id: "garment-size",
+    label: "Size",
+    tags: ["OSFA", "XS-4XL", "S-4XL", "S-2XL", "XS-6XL", "XLT-4XLT"],
+  },
+  { id: "deco", label: "Deco", tags: ["Screen print", "Embroidery", "DTF"] },
+];
+
+const PROMO_SPEC_GROUPS: SpecGroup[] = [
+  { id: "colors", label: "Color(s)", tags: SPEC_COLORS, multi: true },
+  // Promo deco: more than one imprint method is common on the same item.
+  {
+    id: "imprint",
+    label: "Deco",
+    multi: true,
+    tags: [
+      "Deboss",
+      "Screen Print",
+      "Embroidery",
+      "Direct Print",
+      "Sublimation",
+      "Pad Print",
+      "Laser Engrave",
+    ],
+  },
+];
+
+export function specGroupsForType(type: PriceType | ""): SpecGroup[] {
+  if (type === "print") return PRINT_SPEC_GROUPS;
+  if (type === "apparel") return APPAREL_SPEC_GROUPS;
+  if (type === "promo") return PROMO_SPEC_GROUPS;
+  return [];
+}
+
+const ALL_SPEC_GROUPS: SpecGroup[] = [...PRINT_SPEC_GROUPS, ...APPAREL_SPEC_GROUPS, ...PROMO_SPEC_GROUPS];
+
+export const ALL_SPEC_TAGS: readonly string[] = [
+  ...new Set(ALL_SPEC_GROUPS.flatMap((group) => [...group.tags])),
+];
+
+// Keep selected tags in catalog order for the active type (or every catalog when type is unknown).
+export function orderedSpecs(selected: string[], type: PriceType | "" = ""): string[] {
+  const set = new Set(selected);
+  const groups = type ? specGroupsForType(type) : ALL_SPEC_GROUPS;
+  const ordered: string[] = [];
+  for (const group of groups) {
+    for (const tag of group.tags) {
+      if (set.has(tag) && !ordered.includes(tag)) ordered.push(tag);
+    }
+  }
+  return ordered;
+}
+
+// Drop tags that do not belong to the new product type.
+export function specsForType(selected: string[], type: PriceType | ""): string[] {
+  const allowed = new Set(specGroupsForType(type).flatMap((group) => group.tags));
+  return orderedSpecs(
+    selected.filter((tag) => allowed.has(tag)),
+    type,
+  );
+}
+
+// Color(s) toggle on/off. Other groups replace the previous pick in that group.
+export function toggleSpec(selected: string[], tag: string, type: PriceType | ""): string[] {
+  const group = specGroupsForType(type).find((item) => item.tags.includes(tag));
+  if (!group) return orderedSpecs(selected, type);
+  if (group.multi) {
+    const next = selected.includes(tag) ? selected.filter((item) => item !== tag) : [...selected, tag];
+    return orderedSpecs(next, type);
+  }
+  const withoutGroup = selected.filter((item) => !group.tags.includes(item));
+  if (selected.includes(tag)) return orderedSpecs(withoutGroup, type);
+  return orderedSpecs([...withoutGroup, tag], type);
+}
+
 export type QtyBreak = {
   qty: number;
   wholesale: number;
@@ -52,10 +182,12 @@ export const APPAREL_SIZES = ["2XL", "3XL", "4XL", "5XL", "6XL"] as const;
 export type ApparelSize = (typeof APPAREL_SIZES)[number];
 
 // Per piece, added on top of every quantity break. Not a separate price grid.
+// active means the upcharge is live on the product (shown as billable).
 export type SizeUpcharge = {
   size: ApparelSize;
   wholesale: number;
   retail: number;
+  active: boolean;
 };
 
 export type Price = {
@@ -64,12 +196,14 @@ export type Price = {
   name: string;
   // Shown in the table. Type stays a filter, not a column.
   sku: string;
-  // Product owner. Set on the price form and filtered from the toolbar, not a column.
+  // Product owner. Set on the product form and filtered from the toolbar, not a column.
   stakeholderId: number;
-  // Assigned category. Filtered from the toolbar, not shown as a column.
+  // Product category. Set on the product form and filtered beside stakeholder, not a column.
+  category: ProductCategory | "";
+  // Assigned account unit. Filtered from the toolbar, not shown as a column.
   accountUnitId: string | null;
-  // Free-text product specs. Not a table column.
-  specs: string;
+  // Selected spec tags (size, stock, pages, finishing). Not a table column.
+  specs: string[];
   // No longer collected. Kept so older saved rows still load.
   vendor: string;
   breaks: QtyBreak[];
@@ -96,8 +230,9 @@ export const SEED_PRICES: Price[] = [
     name: "Trane Brochure",
     sku: "BR-8PG",
     stakeholderId: 1,
+    category: "Brochure",
     accountUnitId: null,
-    specs: "",
+    specs: ['8.5" x 11"', "08p", "80# Gloss Text"],
     vendor: "",
     breaks: [{ qty: 1, wholesale: 2.4, retail: 3.1 }],
     extras: [],
@@ -110,8 +245,9 @@ export const SEED_PRICES: Price[] = [
     name: "Dealer Poster",
     sku: "PS-2436",
     stakeholderId: 1,
+    category: "Poster",
     accountUnitId: null,
-    specs: "",
+    specs: ['11" x 17"'],
     vendor: "",
     breaks: [{ qty: 1, wholesale: 8, retail: 10.5 }],
     extras: [],
@@ -124,12 +260,35 @@ export const SEED_PRICES: Price[] = [
     name: "Product Spec Sheet",
     sku: "SS-SPEC",
     stakeholderId: 2,
+    category: "Literature",
     accountUnitId: null,
-    specs: "",
+    specs: ['8.5" x 11"', "02p", "100# Silk Text"],
     vendor: "",
     breaks: [{ qty: 1, wholesale: 0.75, retail: 1.05 }],
     extras: [],
     sizeUpcharges: [],
+    active: true,
+  },
+  {
+    id: "seed-polo",
+    type: "apparel",
+    name: "Staff Polo",
+    sku: "AP-POLO",
+    stakeholderId: 1,
+    category: "Apparel",
+    accountUnitId: null,
+    specs: [],
+    vendor: "",
+    breaks: [{ qty: 1, wholesale: 18, retail: 24 }],
+    extras: [],
+    // Sample apparel size ups — checkboxes in the pricing popup toggle live.
+    sizeUpcharges: [
+      { size: "2XL", wholesale: 2, retail: 2.5, active: true },
+      { size: "3XL", wholesale: 3, retail: 3.75, active: true },
+      { size: "4XL", wholesale: 4, retail: 5, active: false },
+      { size: "5XL", wholesale: 5, retail: 6.25, active: false },
+      { size: "6XL", wholesale: 6, retail: 7.5, active: false },
+    ],
     active: true,
   },
 ];
@@ -281,8 +440,9 @@ export function parsePriceCsv(text: string): PriceImport {
       name,
       sku: "",
       stakeholderId: 1,
+      category: "",
       accountUnitId: null,
-      specs: "",
+      specs: [],
       vendor: "",
       breaks: [{ qty: 1, wholesale, retail }],
       extras: [],
@@ -334,8 +494,9 @@ function normalizePrice(value: unknown): Price | null {
       name: row.name,
       sku: skuFromRow(row),
       stakeholderId: ownerFromRow(row),
+      category: categoryFromRow(row),
       accountUnitId: parseAccountUnitId(row.accountUnitId),
-      specs: typeof row.specs === "string" ? row.specs : "",
+      specs: normalizeSpecs(row.specs, type),
       vendor: typeof row.vendor === "string" ? row.vendor : "",
       breaks: sortBreaks(breaks),
       extras: normalizeExtras(row, type),
@@ -353,8 +514,9 @@ function normalizePrice(value: unknown): Price | null {
     name: row.name,
     sku: skuFromRow(row),
     stakeholderId: ownerFromRow(row),
+    category: categoryFromRow(row),
     accountUnitId: parseAccountUnitId(row.accountUnitId),
-    specs: typeof row.specs === "string" ? row.specs : "",
+    specs: normalizeSpecs(row.specs, "print"),
     vendor: "",
     breaks: [{ qty: 1, wholesale, retail }],
     extras: [],
@@ -363,7 +525,7 @@ function normalizePrice(value: unknown): Price | null {
   };
 }
 
-// Sample rows saved before owners existed keep the seed owner. Anything else starts at Stakeholder 1.
+// Sample rows saved before owners existed keep the seed owner. Anything else starts at MarCom.
 const SEED_OWNERS: Record<string, number> = {
   "seed-brochure": 1,
   "seed-poster": 1,
@@ -380,6 +542,22 @@ const SEED_SKUS: Record<string, string> = {
 function skuFromRow(row: Record<string, unknown>): string {
   if (typeof row.sku === "string") return row.sku;
   return SEED_SKUS[String(row.id)] ?? "";
+}
+
+// Sample rows saved before category existed keep the seed category. A stored value, even blank, is left alone.
+const SEED_CATEGORIES: Record<string, ProductCategory> = {
+  "seed-brochure": "Brochure",
+  "seed-poster": "Poster",
+  "seed-spec": "Literature",
+};
+
+function categoryFromRow(row: Record<string, unknown>): ProductCategory | "" {
+  if (typeof row.category === "string") return isProductCategory(row.category) ? row.category : "";
+  return SEED_CATEGORIES[String(row.id)] ?? "";
+}
+
+function isProductCategory(value: string): value is ProductCategory {
+  return PRODUCT_CATEGORIES.includes(value as ProductCategory);
 }
 
 function ownerFromRow(row: Record<string, unknown>): number {
@@ -435,6 +613,32 @@ function normalizePair(value: unknown): MoneyPair | null {
   return { wholesale, retail };
 }
 
+// Tag list, or older free-text that happens to contain known tags.
+// Multi groups keep every match; single-pick groups keep the first in catalog order.
+function normalizeSpecs(value: unknown, type: PriceType | "" = ""): string[] {
+  const raw =
+    Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string")
+      : typeof value === "string" && value.trim()
+        ? ALL_SPEC_TAGS.filter((tag) => value.includes(tag))
+        : [];
+  // Older "3.5\"" alone maps to the business-card size.
+  const aliases = raw.map((tag) => (tag === '3.5"' ? '3.5" x 2"' : tag));
+  const groups = type ? specGroupsForType(type) : ALL_SPEC_GROUPS;
+  const picked: string[] = [];
+  for (const group of groups) {
+    if (group.multi) {
+      for (const tag of group.tags) {
+        if (aliases.includes(tag)) picked.push(tag);
+      }
+      continue;
+    }
+    const match = group.tags.find((tag) => aliases.includes(tag));
+    if (match) picked.push(match);
+  }
+  return orderedSpecs(picked, type);
+}
+
 function normalizeSizes(value: unknown): SizeUpcharge[] {
   if (!Array.isArray(value)) return [];
   const bySize = new Map<ApparelSize, SizeUpcharge>();
@@ -445,11 +649,22 @@ function normalizeSizes(value: unknown): SizeUpcharge[] {
     const wholesale = asMoney(row.wholesale);
     const retail = asMoney(row.retail);
     if (wholesale == null || retail == null) continue;
-    bySize.set(row.size, { size: row.size, wholesale, retail });
+    // Older rows had no active flag — treat them as live.
+    const active = row.active !== false;
+    bySize.set(row.size, { size: row.size, wholesale, retail, active });
   }
   return APPAREL_SIZES.flatMap((size) => {
     const found = bySize.get(size);
     return found ? [found] : [];
+  });
+}
+
+// Full 2XL–6XL list for the charges popup. Missing sizes start inactive at $0.
+export function apparelUpchargeRows(price: Price): SizeUpcharge[] {
+  const bySize = new Map(price.sizeUpcharges.map((item) => [item.size, item]));
+  return APPAREL_SIZES.map((size) => {
+    const found = bySize.get(size);
+    return found ?? { size, wholesale: 0, retail: 0, active: false };
   });
 }
 

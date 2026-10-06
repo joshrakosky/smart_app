@@ -6,36 +6,77 @@
 :root {
   --background: #f1f5f9;
   --foreground: #0f172a;
+  /* Clickable names / money links on light surfaces. */
+  --brand-link: #0f2c4c;
+  --brand-link-hover: #1a4a73;
   color-scheme: light;
 }
 
+/*
+  Soft charcoal dark mode: lifted surfaces + muted silver text.
+  Near-white on near-black reads harsh; this keeps contrast without the glow.
+*/
 .dark {
-  --background: #0b1220;
-  --foreground: #e2e8f0;
+  --background: #141b27;
+  --foreground: #c5ceda;
+  --surface: #1a2332;
+  --surface-raised: #222c3d;
+  --text-primary: #c5ceda;
+  --text-secondary: #a7b3c4;
+  --text-muted: #8b97a8;
+  /* Calm steel blue — readable, not neon sky. */
+  --brand-link: #8eb4d0;
+  --brand-link-hover: #a8c8de;
   color-scheme: dark;
 }
 
 /* Shared page colors follow the toggle. The navy header and left nav stay put. */
-.dark .bg-slate-100 { background-color: #0b1220; }
-.dark .bg-white { background-color: #111827; }
-.dark .bg-slate-50 { background-color: #1e293b; }
-.dark .text-slate-900 { color: #f1f5f9; }
-.dark .text-slate-800 { color: #e2e8f0; }
-.dark .text-slate-700 { color: #cbd5e1; }
-.dark .text-slate-600 { color: #94a3b8; }
-.dark .text-slate-500 { color: #94a3b8; }
-.dark .border-slate-200 { border-color: #334155; }
-.dark .border-slate-100 { border-color: #1e293b; }
-.dark .border-slate-300 { border-color: #475569; }
-.dark .bg-amber-50 { background-color: #422006; }
-.dark .border-amber-200 { border-color: #92400e; }
-.dark .text-amber-950 { color: #fef3c7; }
-.dark .text-red-700 { color: #fca5a5; }
-.dark .hover\:bg-slate-50:hover { background-color: #1e293b; }
-.dark .even\:bg-slate-100:nth-child(even) { background-color: #1e293b; }
-.dark .bg-red-50 { background-color: #3f1d24; }
-.dark .hover\:bg-red-100:hover { background-color: #4c242c; }
-.dark .border-red-200 { border-color: #7f1d1d; }
+.dark .bg-slate-100 { background-color: var(--background); }
+.dark .bg-white { background-color: var(--surface); }
+.dark .bg-slate-50 { background-color: var(--surface-raised); }
+.dark .text-slate-900 { color: var(--text-primary); }
+.dark .text-slate-800 { color: var(--text-primary); }
+.dark .text-slate-700 { color: var(--text-secondary); }
+.dark .text-slate-600 { color: var(--text-secondary); }
+.dark .text-slate-500 { color: var(--text-muted); }
+.dark .text-slate-400 { color: var(--text-muted); }
+.dark .text-slate-300 { color: #6b7789; }
+.dark .border-slate-200 { border-color: #3a465a; }
+.dark .border-slate-100 { border-color: #2a3446; }
+.dark .border-slate-300 { border-color: #4a576c; }
+.dark .bg-amber-50 { background-color: #3a2a14; }
+.dark .border-amber-200 { border-color: #8a6a2e; }
+.dark .text-amber-950 { color: #e8d5a8; }
+.dark .text-red-700 { color: #e8a0a0; }
+.dark .hover\:bg-slate-50:hover { background-color: var(--surface-raised); }
+.dark .hover\:bg-slate-100:hover { background-color: var(--surface-raised); }
+.dark .hover\:border-slate-400:hover { border-color: #5c6a80; }
+.dark .even\:bg-slate-100:nth-child(even) { background-color: #1e2838; }
+.dark .bg-red-50 { background-color: #3a2228; }
+.dark .hover\:bg-red-100:hover { background-color: #4a2a32; }
+.dark .border-red-200 { border-color: #6b3a42; }
+.dark .disabled\:bg-slate-100:disabled { background-color: var(--surface-raised); }
+.dark .disabled\:border-slate-200:disabled { border-color: #2a3446; }
+.dark .disabled\:text-slate-300:disabled { color: #6b7789; }
+.dark .disabled\:hover\:bg-slate-100:disabled:hover { background-color: var(--surface-raised); }
+.dark .disabled\:hover\:text-slate-300:disabled:hover { color: #6b7789; }
+
+/* Hard-coded brand navy used as text/border on surfaces — soften in dark mode. */
+.dark .text-\[\#0f2c4c\] { color: var(--brand-link); }
+.dark .hover\:text-\[\#0f2c4c\]:hover { color: var(--brand-link-hover); }
+.dark .border-\[\#0f2c4c\] { border-color: #6a8fa8; }
+.dark .disabled\:hover\:text-\[\#0f2c4c\]:disabled:hover { color: #6b7789; }
+
+/* Form controls inherit the dark scheme so native pickers/options match. */
+.dark input,
+.dark select,
+.dark textarea {
+  color-scheme: dark;
+}
+
+.dark dialog {
+  color: var(--foreground);
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -49,6 +90,12 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Dark mode: keep type crisp without the bright-white glow on charcoal. */
+.dark body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 h1 {
@@ -66,6 +113,10 @@ h1 {
   box-shadow: 0 8px 18px rgb(15 23 42 / 0.18);
 }
 
+.dark .hover-lift:hover:not(:disabled) {
+  box-shadow: 0 8px 18px rgb(0 0 0 / 0.45);
+}
+
 .hover-raise {
   transition: transform 160ms ease, box-shadow 160ms ease;
 }
@@ -73,4 +124,8 @@ h1 {
 .hover-raise:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 6px 14px rgb(15 23 42 / 0.14);
+}
+
+.dark .hover-raise:hover:not(:disabled) {
+  box-shadow: 0 6px 14px rgb(0 0 0 / 0.4);
 }

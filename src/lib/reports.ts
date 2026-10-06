@@ -2,21 +2,21 @@ import type { ExcelColumn, ExcelSheet } from "@/lib/excel";
 import { fromCents, toCents } from "@/lib/money";
 import { baseBreak, gpmDollars, gpmPercent, PRICE_TYPE_LABELS, type Price } from "@/lib/prices";
 import { stakeholderName } from "@/lib/stakeholders";
-import { formatDuration, projectStatus, projectTotalMs, type Project } from "@/lib/time-clock";
+import { hoursDecimal, timeLines, type Project } from "@/lib/time-clock";
 import type { OrderLineSummary } from "@/lib/types";
 
 // First-pass columns. They follow the columns already on each screen.
 // Change these lists when the exact report layout is decided.
 // Prices use the lowest quantity break only. Extra breaks, setup, run, and size upcharges are not columns yet.
 // Orders are every line, not the dashboard page or its filters. Stakeholder is included so a full export still shows the owner.
-// Time matches the grouped hours table. Hours is a decimal so Excel can add it up. Time is the same label the screen shows.
+// Hours is one line per person / day / project so billing can see who worked where.
 
 export type ReportId = "prices" | "orders" | "time";
 
 export const REPORTS: { id: ReportId; label: string; detail: string }[] = [
   {
     id: "prices",
-    label: "Price tables",
+    label: "Products",
     detail: "Name, owner, type, wholesale, retail, GPM, and active.",
   },
   {
@@ -26,8 +26,8 @@ export const REPORTS: { id: ReportId; label: string; detail: string }[] = [
   },
   {
     id: "time",
-    label: "Time clock",
-    detail: "Project, IH date, status, decimal hours, and the time shown on screen.",
+    label: "Hours",
+    detail: "Person, date, project, and decimal hours — one line per person per day per project.",
   },
 ];
 
@@ -58,16 +58,15 @@ const orderColumns: ExcelColumn[] = [
 ];
 
 const timeColumns: ExcelColumn[] = [
+  { header: "Person", kind: "text" },
+  { header: "Date", kind: "text" },
   { header: "Project", kind: "text" },
-  { header: "IH Dates", kind: "text" },
-  { header: "Status", kind: "text" },
   { header: "Hours", kind: "number" },
-  { header: "Time", kind: "text" },
 ];
 
 export function priceReport(prices: Price[]): ExcelSheet {
   return {
-    name: "Price tables",
+    name: "Products",
     columns: priceColumns,
     rows: prices.map((price) => {
       const base = baseBreak(price);
@@ -111,17 +110,12 @@ export function timeReport(projects: Project[], now: number): ExcelSheet {
   return {
     name: "Hours",
     columns: timeColumns,
-    rows: projects.map((project) => {
-      const totalMs = projectTotalMs(project, now);
-      const live = projectStatus(project) === "In Progress";
-      return [
-        project.name,
-        project.ihDate,
-        projectStatus(project),
-        Math.round((totalMs / 3_600_000) * 100) / 100,
-        formatDuration(totalMs, live),
-      ];
-    }),
+    rows: timeLines(projects, now).map((line) => [
+      line.person,
+      line.date,
+      line.project,
+      hoursDecimal(line.ms),
+    ]),
   };
 }
 

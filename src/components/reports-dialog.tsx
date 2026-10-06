@@ -21,7 +21,6 @@ const navyButton =
 export function ReportsDialog({ onClose }: { onClose: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [busy, setBusy] = useState<ReportId | null>(null);
-  const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,21 +33,13 @@ export function ReportsDialog({ onClose }: { onClose: () => void }) {
   async function exportReport(id: ReportId) {
     setBusy(id);
     setError(null);
-    setNote(null);
     try {
       if (id === "prices") {
-        const prices = getPricesSnapshot();
-        downloadExcel(reportFilename(id), priceReport(prices));
-        setNote(savedNote("Price tables", prices.length));
+        downloadExcel(reportFilename(id), priceReport(getPricesSnapshot()));
       } else if (id === "time") {
-        const projects = getProjectsSnapshot();
-        const sheet = timeReport(projects, Date.now());
-        downloadExcel(reportFilename(id), sheet);
-        setNote(savedNote("Time clock", sheet.rows.length));
+        downloadExcel(reportFilename(id), timeReport(getProjectsSnapshot(), Date.now()));
       } else {
-        const lines = await loadOrders();
-        downloadExcel(reportFilename(id), orderReport(lines));
-        setNote(savedNote("Orders", lines.length));
+        downloadExcel(reportFilename(id), orderReport(await loadOrders()));
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not build that report.");
@@ -102,15 +93,8 @@ export function ReportsDialog({ onClose }: { onClose: () => void }) {
       </ul>
 
       {error ? <p className="px-5 pb-4 text-sm text-red-700">{error}</p> : null}
-      {note ? <p className="px-5 pb-4 text-sm text-slate-600">{note}</p> : null}
     </dialog>
   );
-}
-
-function savedNote(label: string, count: number): string {
-  if (count === 0) return `${label} downloaded with headers only. There are no rows yet.`;
-  const noun = count === 1 ? "row" : "rows";
-  return `${label} downloaded, ${count} ${noun}.`;
 }
 
 async function loadOrders(): Promise<OrderLineSummary[]> {
