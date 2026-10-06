@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// Notes for one inventory product. Opened from the Actions column.
+// Notes for one product or onboarding queue row. Queue notes auto-fill from
+// what changed on save; the team can still edit before completing.
 export function ProductNotes({
   product,
   notes,

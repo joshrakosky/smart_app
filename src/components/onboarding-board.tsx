@@ -2,22 +2,18 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { PriceFormDialog } from "@/components/price-form-dialog";
-import { ProductNotes } from "@/components/product-notes";
 import {
   QUEUE_KIND_LABELS,
   cancelOnboarding,
   completeOnboarding,
   getOnboardingServerSnapshot,
   getOnboardingSnapshot,
-  setOnboardingNote,
   subscribeOnboarding,
   type OnboardingItem,
 } from "@/lib/onboarding";
 
 const iconButton =
   "flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-100 hover:text-[#0f2c4c]";
-const iconButtonOn =
-  "flex h-8 w-8 items-center justify-center rounded-lg border border-[#0f2c4c] bg-[#0f2c4c] text-white";
 const headerCell =
   "sticky top-0 z-10 whitespace-nowrap border-r border-b border-slate-200 bg-slate-50 px-4 py-2.5 font-medium last:border-r-0";
 const bodyCell = "border-r border-b border-slate-200 px-4 py-2.5 last:border-r-0";
@@ -34,7 +30,6 @@ export function OnboardingBoard() {
   const items = useSyncExternalStore(subscribeOnboarding, getOnboardingSnapshot, getOnboardingServerSnapshot);
   const open = items.filter((item) => item.status === "open");
   const [review, setReview] = useState<OnboardingItem | null>(null);
-  const [notesFor, setNotesFor] = useState<OnboardingItem | null>(null);
   const [confirm, setConfirm] = useState<QueueConfirm | null>(null);
 
   return (
@@ -42,22 +37,26 @@ export function OnboardingBoard() {
       <section aria-label="Onboarding queue" className="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 px-4 py-3">
           <h2 className="text-base font-semibold">Queue</h2>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Keep ecomm and backend product records aligned. Notes list what changed on each save.
+          </p>
         </div>
         <div className="h-[416px] overflow-auto">
-          <table className="w-full min-w-[44rem] border-separate border-spacing-0 text-center text-sm">
+          <table className="w-full min-w-[56rem] border-separate border-spacing-0 text-center text-sm">
             <thead className="text-slate-600">
               <tr>
                 <th className={headerCell}>Queue date</th>
                 <th className={headerCell}>Product</th>
                 <th className={headerCell}>SKU</th>
                 <th className={headerCell}>Change</th>
+                <th className={`${headerCell} text-left`}>Notes</th>
                 <th className={headerCell}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {open.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-6 text-slate-500" colSpan={5}>
+                  <td className="px-4 py-6 text-slate-500" colSpan={6}>
                     Nothing is waiting for onboarding.
                   </td>
                 </tr>
@@ -76,16 +75,12 @@ export function OnboardingBoard() {
                     </td>
                     <td className={`${bodyCell} whitespace-nowrap`}>{item.product.sku || "—"}</td>
                     <td className={bodyCell}>{QUEUE_KIND_LABELS[item.kind]}</td>
+                    {/* Auto-filled from the save diff — view only for now. */}
+                    <td className={`${bodyCell} max-w-xs whitespace-pre-wrap text-left text-xs leading-snug text-slate-700`}>
+                      {item.note.trim() || "—"}
+                    </td>
                     <td className={bodyCell}>
                       <div className="flex items-center justify-center gap-1">
-                        <button
-                          type="button"
-                          aria-label={`Note for ${item.product.name}`}
-                          onClick={() => setNotesFor(item)}
-                          className={item.note.trim() ? iconButtonOn : iconButton}
-                        >
-                          <NoteIcon />
-                        </button>
                         <button
                           type="button"
                           aria-label={`Complete ${item.product.name}`}
@@ -136,15 +131,6 @@ export function OnboardingBoard() {
         />
       ) : null}
 
-      {notesFor ? (
-        <ProductNotes
-          title="Onboarding note"
-          product={notesFor.product.name}
-          notes={notesFor.note}
-          onClose={() => setNotesFor(null)}
-          onSave={(note) => setOnboardingNote(notesFor.id, note)}
-        />
-      ) : null}
     </div>
   );
 }
@@ -219,16 +205,6 @@ function formatQueued(iso: string): string {
   return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-function NoteIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M7 3.5h7.2L19 8.2V20.5H7V3.5Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-      <path d="M14.2 3.5V8.2H19" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-      <path d="M10 12.2h6M10 16h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function CheckIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -237,11 +213,11 @@ function CheckIcon() {
   );
 }
 
+// Plain X — no circle — so cancel reads differently from a status badge.
 function CancelIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M9 9l6 6M15 9l-6 6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
     </svg>
   );
 }

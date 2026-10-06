@@ -131,7 +131,8 @@ export function PriceTable() {
     const previous = prices.find((price) => price.id === next.id);
     replacePrices(previous ? prices.map((price) => (price.id === next.id ? next : price)) : [...prices, next]);
     // The prompt already decided. A second save of an open row updates that row.
-    if (queue) enqueueOnboarding(next, queueKindForSave(previous, next));
+    // Pass previous so the queue note lists category, pricing, specs, etc. that changed.
+    if (queue) enqueueOnboarding(next, queueKindForSave(previous, next), previous);
     setFormOpen(false);
   }
 

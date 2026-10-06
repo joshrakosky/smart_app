@@ -352,7 +352,8 @@ function QueuePrompt({
           </button>
         </div>
         <p className="text-sm text-slate-600">
-          The product is saved either way. Add it to the queue if the ecomm team should onboard or update it.
+          The product is saved either way. Add it to the queue when ecomm needs to stay aligned with this
+          backend change — the queue note will list what changed.
         </p>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onSkip} className={outlineButton}>
