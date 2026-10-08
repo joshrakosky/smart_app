@@ -24,5 +24,5 @@ export function inventoryHref({
   if (query.trim()) params.set("q", query.trim());
   if (page > 1) params.set("page", String(page));
   const search = params.toString();
-  return search ? `/inventory?${search}` : "/inventory";
+  return search ? `/prices?${search}` : "/prices";
 }

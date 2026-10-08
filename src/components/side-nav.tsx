@@ -7,7 +7,6 @@ import { getOnboardingSnapshot, subscribeOnboarding } from "@/lib/onboarding";
 
 const items = [
   { href: "/", label: "Dashboard", icon: DashboardIcon },
-  { href: "/inventory", label: "Inventory", icon: InventoryIcon },
   { href: "/prices", label: "Products", icon: ProductsIcon },
   { href: "/onboarding", label: "Onboarding", icon: OnboardingIcon },
   { href: "/time", label: "Time clock", icon: ClockIcon },
@@ -71,26 +70,6 @@ function DashboardIcon() {
       <rect x="13.4" y="3.2" width="7.4" height="4.6" rx="1.4" stroke="currentColor" strokeWidth={iconStroke} />
       <rect x="13.4" y="10.6" width="7.4" height="10.2" rx="1.4" stroke="currentColor" strokeWidth={iconStroke} />
       <rect x="3.2" y="13.4" width="7.4" height="7.4" rx="1.4" stroke="currentColor" strokeWidth={iconStroke} />
-    </svg>
-  );
-}
-
-function InventoryIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M3.5 8.2 12 4.4l8.5 3.8L12 12 3.5 8.2Z"
-        stroke="currentColor"
-        strokeWidth={iconStroke}
-        strokeLinejoin="round"
-      />
-      <path
-        d="M3.5 8.2V15.8L12 19.6l8.5-3.8V8.2"
-        stroke="currentColor"
-        strokeWidth={iconStroke}
-        strokeLinejoin="round"
-      />
-      <path d="M12 12v7.6" stroke="currentColor" strokeWidth={iconStroke} />
     </svg>
   );
 }

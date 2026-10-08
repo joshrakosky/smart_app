@@ -497,7 +497,7 @@ function priceScope(
 }
 
 // The cell shows the lowest quantity. A click opens that side's charge breakdown.
-function ChargeButton({
+export function ChargeButton({
   price,
   side = "wholesale",
   onOpen,
@@ -522,7 +522,7 @@ function ChargeButton({
 }
 
 // Wholesale pricing vs Retail — same sections, one money column for the side that opened it.
-function ChargeDialog({
+export function ChargeDialog({
   price,
   side,
   onClose,

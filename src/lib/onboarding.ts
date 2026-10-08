@@ -67,9 +67,20 @@ export function queueKindForSave(previous: Price | undefined, next: Price): Queu
 // One open row per product. A second yes updates that row and appends new change notes.
 export function enqueueOnboarding(product: Price, kind: QueueKind, previous?: Price) {
   const snapshot = structuredClone(product);
-  const changeNote = describeProductChanges(previous, snapshot, kind);
+  writeQueueRow(snapshot, kind, describeProductChanges(previous, snapshot, kind));
+}
+
+// Inline edits that are not the product form, such as a reorder point, still
+// land on the same open row so ecomm sees them with the other field changes.
+export function enqueueOnboardingNote(product: Price, note: string) {
+  const text = note.trim();
+  if (!text) return;
+  writeQueueRow(structuredClone(product), "update", text);
+}
+
+function writeQueueRow(snapshot: Price, kind: QueueKind, changeNote: string) {
   const current = getOnboardingSnapshot();
-  const open = current.find((item) => item.productId === product.id && item.status === "open");
+  const open = current.find((item) => item.productId === snapshot.id && item.status === "open");
   const next = open
     ? current.map((item) =>
         item.id === open.id
@@ -86,7 +97,7 @@ export function enqueueOnboarding(product: Price, kind: QueueKind, previous?: Pr
     : [
         {
           id: crypto.randomUUID(),
-          productId: product.id,
+          productId: snapshot.id,
           kind,
           product: snapshot,
           note: changeNote,

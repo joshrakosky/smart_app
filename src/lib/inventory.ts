@@ -1,7 +1,9 @@
 import type { Brand } from "@/lib/brands";
 
 // Sample on-hand stock until inventory has a database table.
-// Reorder points, product notes, and the production-order flag are saved in this browser.
+// Reorder points, product notes, the production-order flag, and open reorder
+// requests are saved in this browser.
+// The production-order action opens a restock form. It stays navy until that order is completed or cancelled.
 // Changing a reorder point can move a product between In Stock and Low Stock.
 // Status rules, first match wins:
 //   balance < 0  Backorder
@@ -37,10 +39,40 @@ type InventorySeed = {
   ytdUsage: number;
 };
 
-// Notes and the production-order flag are saved in this browser, like the reorder point.
+// Status of an open production order. Completing or cancelling clears the order.
+export const PRODUCTION_ORDER_STATUSES = ["in-progress", "in-production", "on-hold"] as const;
+
+export type ProductionOrderStatus = (typeof PRODUCTION_ORDER_STATUSES)[number];
+
+export const PRODUCTION_ORDER_STATUS_LABELS: Record<ProductionOrderStatus, string> = {
+  "in-progress": "In Progress",
+  "in-production": "In Production",
+  "on-hold": "On Hold",
+};
+
+// One open production order per product. The action stays navy until it is completed or cancelled.
+export type InventoryReorder = {
+  pvNumber: string;
+  // Blank on the form stays null. A filled value is a whole number of at least 1.
+  quantity: number | null;
+  // YYYY-MM-DD from the date picker. Optional.
+  estimatedCompletion: string;
+  status: ProductionOrderStatus;
+  createdAt: string;
+};
+
+// Latest completed production order. The reorder-point hover reads this.
+export type CompletedProductionOrder = {
+  quantity: number | null;
+  completedAt: string;
+};
+
+// Notes, the production-order flag, and an open reorder are saved in this browser.
 export type InventoryItem = InventorySeed & {
   notes: string;
   productionOrdered: boolean;
+  openReorder: InventoryReorder | null;
+  lastCompleted: CompletedProductionOrder | null;
 };
 
 export const SEED_INVENTORY: InventorySeed[] = [
@@ -61,6 +93,8 @@ export const SEED_INVENTORY: InventorySeed[] = [
 const STORAGE_KEY = "smart-inventory-reorders";
 const NOTES_KEY = "smart-inventory-notes";
 const ORDERS_KEY = "smart-inventory-orders";
+const REORDER_REQUESTS_KEY = "smart-inventory-reorder-requests";
+const COMPLETED_ORDERS_KEY = "smart-inventory-completed-orders";
 
 let cachedItems: InventoryItem[] | null = null;
 const itemListeners = new Set<() => void>();
@@ -75,8 +109,17 @@ export function getInventorySnapshot(): InventoryItem[] {
   return cachedItems;
 }
 
+// useSyncExternalStore requires a stable server snapshot. A new array each call loops.
+const SERVER_INVENTORY: InventoryItem[] = SEED_INVENTORY.map((item) => ({
+  ...item,
+  notes: "",
+  productionOrdered: false,
+  openReorder: null,
+  lastCompleted: null,
+}));
+
 export function getInventoryServerSnapshot(): InventoryItem[] {
-  return SEED_INVENTORY.map((item) => decorate(item, "", false));
+  return SERVER_INVENTORY;
 }
 
 export function inventoryStatus(item: Pick<InventoryItem, "balance" | "reorder">): InventoryStatus {
@@ -127,7 +170,7 @@ export function setInventoryReorder(id: string, reorder: number) {
   notifyInventory();
 }
 
-// Stays on until clicked again, so a low or out row can show that restock was already ordered.
+// Older on/off flag. The action button now follows an open production order instead.
 export function setProductionOrdered(id: string, ordered: boolean) {
   const next = getInventorySnapshot().map((item) => (item.id === id ? { ...item, productionOrdered: ordered } : item));
   cachedItems = next;
@@ -136,6 +179,72 @@ export function setProductionOrdered(id: string, ordered: boolean) {
     if (item.productionOrdered) flags[item.id] = true;
   }
   localStorage.setItem(ORDERS_KEY, JSON.stringify(flags));
+  notifyInventory();
+}
+
+export function saveInventoryReorder(
+  id: string,
+  input: {
+    pvNumber: string;
+    quantity: number | null;
+    estimatedCompletion: string;
+    status: ProductionOrderStatus;
+  },
+): boolean {
+  const estimatedCompletion = input.estimatedCompletion.trim();
+  if (estimatedCompletion && !/^\d{4}-\d{2}-\d{2}$/.test(estimatedCompletion)) return false;
+  if (input.quantity != null && (!Number.isInteger(input.quantity) || input.quantity < 1)) return false;
+  if (!PRODUCTION_ORDER_STATUSES.includes(input.status)) return false;
+  if (!SEED_INVENTORY.some((item) => item.id === id)) return false;
+
+  const existing = getInventorySnapshot().find((item) => item.id === id)?.openReorder;
+  const order: InventoryReorder = {
+    pvNumber: input.pvNumber.trim(),
+    quantity: input.quantity,
+    estimatedCompletion,
+    status: input.status,
+    // Editing an open order keeps the original created time.
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+  };
+  const next = getInventorySnapshot().map((item) => (item.id === id ? { ...item, openReorder: order } : item));
+  cachedItems = next;
+  writeOpenReorders(next);
+  notifyInventory();
+  return true;
+}
+
+// Completing keeps the qty and date for the reorder-point hover, then clears the open order.
+export function completeInventoryReorder(id: string) {
+  const current = getInventorySnapshot();
+  const open = current.find((item) => item.id === id)?.openReorder;
+  if (!open) return;
+  const completed: CompletedProductionOrder = {
+    quantity: open.quantity,
+    completedAt: new Date().toISOString(),
+  };
+  const next = current.map((item) =>
+    item.id === id ? { ...item, openReorder: null, lastCompleted: completed } : item,
+  );
+  cachedItems = next;
+  writeOpenReorders(next);
+  writeCompletedOrders(next);
+  notifyInventory();
+}
+
+// Whole days since the last completed production order. Today is 0.
+export function daysSinceCompleted(completedAt: string, today = new Date()): number {
+  const then = new Date(completedAt);
+  if (Number.isNaN(then.getTime())) return 0;
+  const startToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const startThen = Date.UTC(then.getFullYear(), then.getMonth(), then.getDate());
+  return Math.max(0, Math.round((startToday - startThen) / 86_400_000));
+}
+
+// Cancelling clears the open request and does not update the previous reorder.
+export function clearInventoryReorder(id: string) {
+  const next = getInventorySnapshot().map((item) => (item.id === id ? { ...item, openReorder: null } : item));
+  cachedItems = next;
+  writeOpenReorders(next);
   notifyInventory();
 }
 
@@ -155,19 +264,95 @@ function notifyInventory() {
   for (const listener of itemListeners) listener();
 }
 
-function decorate(item: InventorySeed, notes: string, productionOrdered: boolean): InventoryItem {
-  return { ...item, notes, productionOrdered };
+function decorate(
+  item: InventorySeed,
+  notes: string,
+  productionOrdered: boolean,
+  openReorder: InventoryReorder | null,
+  lastCompleted: CompletedProductionOrder | null,
+): InventoryItem {
+  return { ...item, notes, productionOrdered, openReorder, lastCompleted };
 }
 
 function loadInventory(): InventoryItem[] {
   const overrides = readOverrides();
   const notes = readNotes();
   const orders = readOrders();
+  const reorders = readReorderRequests();
+  const completed = readCompletedOrders();
   return SEED_INVENTORY.map((item) => {
     const reorder = overrides[item.id];
     const row = reorder == null ? item : { ...item, reorder };
-    return decorate(row, notes[item.id] ?? "", orders.has(item.id));
+    return decorate(row, notes[item.id] ?? "", orders.has(item.id), reorders[item.id] ?? null, completed[item.id] ?? null);
   });
+}
+
+function writeCompletedOrders(items: InventoryItem[]) {
+  const saved: Record<string, CompletedProductionOrder> = {};
+  for (const item of items) {
+    if (item.lastCompleted) saved[item.id] = item.lastCompleted;
+  }
+  localStorage.setItem(COMPLETED_ORDERS_KEY, JSON.stringify(saved));
+}
+
+function readCompletedOrders(): Record<string, CompletedProductionOrder> {
+  const parsed = readRecord(COMPLETED_ORDERS_KEY);
+  const completed: Record<string, CompletedProductionOrder> = {};
+  for (const [id, value] of Object.entries(parsed)) {
+    const order = normalizeCompleted(value);
+    if (order && SEED_INVENTORY.some((item) => item.id === id)) completed[id] = order;
+  }
+  return completed;
+}
+
+function normalizeCompleted(value: unknown): CompletedProductionOrder | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const quantity = optionalQuantity(row.quantity);
+  const completedAt = typeof row.completedAt === "string" ? row.completedAt : "";
+  if (!completedAt || Number.isNaN(new Date(completedAt).getTime())) return null;
+  return { quantity, completedAt };
+}
+
+function writeOpenReorders(items: InventoryItem[]) {
+  const saved: Record<string, InventoryReorder> = {};
+  for (const item of items) {
+    if (item.openReorder) saved[item.id] = item.openReorder;
+  }
+  localStorage.setItem(REORDER_REQUESTS_KEY, JSON.stringify(saved));
+}
+
+function readReorderRequests(): Record<string, InventoryReorder> {
+  const parsed = readRecord(REORDER_REQUESTS_KEY);
+  const requests: Record<string, InventoryReorder> = {};
+  for (const [id, value] of Object.entries(parsed)) {
+    const order = normalizeReorder(value);
+    if (order && SEED_INVENTORY.some((item) => item.id === id)) requests[id] = order;
+  }
+  return requests;
+}
+
+function normalizeReorder(value: unknown): InventoryReorder | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const pvNumber = typeof row.pvNumber === "string" ? row.pvNumber.trim() : "";
+  const quantity = optionalQuantity(row.quantity);
+  const estimatedCompletion =
+    typeof row.estimatedCompletion === "string" && /^\d{4}-\d{2}-\d{2}$/.test(row.estimatedCompletion)
+      ? row.estimatedCompletion
+      : "";
+  const createdAt = typeof row.createdAt === "string" ? row.createdAt : "";
+  const status = PRODUCTION_ORDER_STATUSES.includes(row.status as ProductionOrderStatus)
+    ? (row.status as ProductionOrderStatus)
+    : "in-progress";
+  if (!createdAt) return null;
+  return { pvNumber, quantity, estimatedCompletion, status, createdAt };
+}
+
+function optionalQuantity(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const quantity = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(quantity) && quantity >= 1 ? quantity : null;
 }
 
 function readOverrides(): Record<string, number> {

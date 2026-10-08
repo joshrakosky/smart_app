@@ -31,6 +31,22 @@ export function OnboardingBoard() {
   const open = items.filter((item) => item.status === "open");
   const [review, setReview] = useState<OnboardingItem | null>(null);
   const [confirm, setConfirm] = useState<QueueConfirm | null>(null);
+  // Brief feedback after click-to-copy on a SKU cell.
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  async function copySku(item: OnboardingItem) {
+    const sku = item.product.sku.trim();
+    if (!sku) return;
+    try {
+      await navigator.clipboard.writeText(sku);
+      setCopiedId(item.id);
+      window.setTimeout(() => {
+        setCopiedId((current) => (current === item.id ? null : current));
+      }, 1200);
+    } catch {
+      // Clipboard can fail without permission — leave the label unchanged.
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -73,7 +89,21 @@ export function OnboardingBoard() {
                         {item.product.name}
                       </button>
                     </td>
-                    <td className={`${bodyCell} whitespace-nowrap`}>{item.product.sku || "—"}</td>
+                    <td className={`${bodyCell} whitespace-nowrap`}>
+                      {item.product.sku.trim() ? (
+                        <button
+                          type="button"
+                          onClick={() => void copySku(item)}
+                          title="Copy SKU"
+                          aria-label={`Copy SKU ${item.product.sku}`}
+                          className="font-medium text-[#0f2c4c] underline-offset-2 hover:underline"
+                        >
+                          {copiedId === item.id ? "Copied" : item.product.sku}
+                        </button>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td className={bodyCell}>{QUEUE_KIND_LABELS[item.kind]}</td>
                     {/* Auto-filled from the save diff — view only for now. */}
                     <td className={`${bodyCell} max-w-xs whitespace-pre-wrap text-left text-xs leading-snug text-slate-700`}>

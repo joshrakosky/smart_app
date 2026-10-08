@@ -103,12 +103,15 @@ type FormDraft = {
 // Fixed dialog. Details, Specs, Breaks, Extras, and Art are tabs, so the window does not resize between them.
 export function PriceFormDialog({
   editing,
+  prefill = null,
   readOnly = false,
   onClose,
   onSave,
   onImport,
 }: {
   editing: Price | null;
+  // Stock row with no price yet. Fills name, SKU, and stakeholder on a new profile.
+  prefill?: { name: string; sku: string; stakeholderId: number } | null;
   // Queue review uses the same tabs without writing the product back.
   readOnly?: boolean;
   onClose: () => void;
@@ -117,7 +120,7 @@ export function PriceFormDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const listingId = useRef(editing?.id ?? crypto.randomUUID());
-  const [draft, setDraft] = useState<FormDraft>(() => draftFrom(editing));
+  const [draft, setDraft] = useState<FormDraft>(() => draftFrom(editing, prefill));
   // Held until the user says whether this save belongs on the onboarding queue.
   const [pending, setPending] = useState<Price | null>(null);
 
@@ -175,7 +178,7 @@ export function PriceFormDialog({
       >
         <div className="flex items-start justify-between gap-3 px-5 pt-4">
           <h2 id="price-form-title" className="text-lg font-semibold">
-            {readOnly ? "Product" : editing ? "Edit product" : "Add product"}
+            {readOnly ? "Product" : editing || prefill ? "Edit product" : "Add product"}
           </h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-xl leading-none text-slate-500">
             ×
@@ -1087,8 +1090,15 @@ function blankDraft(): FormDraft {
   };
 }
 
-function draftFrom(price: Price | null): FormDraft {
-  if (!price) return blankDraft();
+function draftFrom(
+  price: Price | null,
+  prefill?: { name: string; sku: string; stakeholderId: number } | null,
+): FormDraft {
+  if (!price) {
+    const blank = blankDraft();
+    if (!prefill) return blank;
+    return { ...blank, name: prefill.name, sku: prefill.sku, stakeholderId: prefill.stakeholderId };
+  }
   return {
     step: "details",
     type: price.type,

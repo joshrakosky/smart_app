@@ -56,15 +56,13 @@ export function ProductNotes({
             ×
           </button>
         </div>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-slate-700">Notes</span>
-          <textarea
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            rows={5}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-900 shadow-sm"
-          />
-        </label>
+        <textarea
+          aria-label="Notes"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          rows={5}
+          className="rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-900 shadow-sm"
+        />
         <button
           type="submit"
           className="h-10 w-fit rounded-lg bg-[#0f2c4c] px-4 text-sm font-medium text-white transition-colors hover:bg-[#1a4a73]"
