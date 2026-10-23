@@ -409,6 +409,19 @@ export function timeLines(projects: Project[], now: number): TimeLine[] {
   });
 }
 
+// One person, 40 hours, Monday through Sunday. The next Monday starts a fresh 40.
+export const WEEKLY_CAP_MS = 40 * 60 * 60 * 1000;
+
+// Time left this week. Running work counts. Pause time does not. Never goes below zero.
+export function weeklyRemainingMs(projects: Project[], at: number, person = CURRENT_USER): number {
+  if (at <= 0) return WEEKLY_CAP_MS;
+  const { from, to } = hoursSpanRange("week", at);
+  const worked = timeLines(projects, at)
+    .filter((line) => line.person === person && line.date >= from && line.date <= to)
+    .reduce((sum, line) => sum + line.ms, 0);
+  return Math.max(0, WEEKLY_CAP_MS - worked);
+}
+
 // The Hours export bills whole minutes. The on-screen clock still shows hours and minutes.
 export function reportMinutes(ms: number): number {
   return Math.round(ms / MINUTE);

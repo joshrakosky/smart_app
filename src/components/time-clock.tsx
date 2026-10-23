@@ -31,6 +31,7 @@ import {
   timeLines,
   updateProject,
   userSession,
+  weeklyRemainingMs,
   PROJECT_ACCOUNT_UNITS,
   PROJECT_BRANDS,
   PROJECT_TYPES,
@@ -107,6 +108,12 @@ export function TimeClock() {
   const [editIhDate, setEditIhDate] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ClockConfirm | null>(null);
+  // Idle weeks still need a timestamp. `now` stays 0 until a clock is moving.
+  const [mountedAt, setMountedAt] = useState(0);
+
+  useEffect(() => {
+    setMountedAt(Date.now());
+  }, []);
 
   // Tick while work or a pause is being counted.
   const ticking = projects.some((project) =>
@@ -123,6 +130,20 @@ export function TimeClock() {
       window.clearTimeout(kick);
     };
   }, [ticking]);
+
+  const clockAt = now > 0 ? now : mountedAt;
+  const weekLeft = weeklyRemainingMs(projects, clockAt);
+  const mineRunning = projects.some((project) => userSession(project)?.status === "running");
+
+  // The 40-hour week is a hard stop. Pause the running project once nothing is left.
+  useEffect(() => {
+    if (weekLeft > 0 || !mineRunning) return;
+    const running = projects.find((project) => userSession(project)?.status === "running");
+    if (!running) return;
+    const stamp = Date.now();
+    setNow(stamp);
+    replaceProjects(pauseProject(projects, running.id, stamp));
+  }, [weekLeft, mineRunning, projects]);
 
   const current = projects.filter((project) => project.close == null);
   const selected = selectedId ? projects.filter((project) => project.id === selectedId) : projects;
@@ -272,6 +293,8 @@ export function TimeClock() {
     const at = Date.now();
     setNow(at);
     const mine = userSession(project);
+    // Play is refused once this week's 40 hours are gone. Pause still works.
+    if (mine?.status !== "running" && weeklyRemainingMs(projects, at) <= 0) return;
     const next =
       mine?.status === "running"
         ? pauseProject(projects, project.id, at)
@@ -327,10 +350,11 @@ export function TimeClock() {
               ))}
             </select>
           </label>
+          <WeekClock remaining={weekLeft} running={mineRunning} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <button type="button" onClick={() => hoursRef.current?.showModal()} className={outlineButton}>
-            My hours
+          <button type="button" onClick={() => hoursRef.current?.showModal()} aria-label="My hours" className={addButton}>
+            <HoursIcon />
           </button>
           <button type="button" onClick={openCreate} aria-label="New project" className={addButton}>
             +
@@ -408,13 +432,15 @@ export function TimeClock() {
                             <button
                               type="button"
                               aria-label={
-                                running
-                                  ? `Pause ${project.name}`
-                                  : mine?.pausedSince != null
-                                    ? `Resume ${project.name}`
-                                    : `Start ${project.name}`
+                                !running && weekLeft <= 0
+                                  ? "Weekly 40 hours used"
+                                  : running
+                                    ? `Pause ${project.name}`
+                                    : mine?.pausedSince != null
+                                      ? `Resume ${project.name}`
+                                      : `Start ${project.name}`
                               }
-                              disabled={locked}
+                              disabled={locked || (!running && weekLeft <= 0)}
                               onClick={() => track(project)}
                               className={running ? pauseButton : startButton}
                             >
@@ -1384,6 +1410,39 @@ function parseAllottedHours(raw: string): number | null | "invalid" {
 function formatAllotted(hours: number | null): string {
   if (hours == null) return "—";
   return hours.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
+// Counts down this person's 40-hour week. Seconds show only while their clock is running.
+function WeekClock({ remaining, running }: { remaining: number; running: boolean }) {
+  const label = formatWeekLeft(remaining, running);
+  const tone = remaining <= 0 ? "text-red-700" : remaining < 4 * 60 * 60 * 1000 ? "text-amber-700" : "text-[#0f2c4c]";
+  return (
+    <div
+      className="flex h-10 items-center gap-3 self-end rounded-lg border border-slate-300 bg-white px-3 shadow-sm"
+      title="Resets each Monday"
+    >
+      <span className="text-xs font-medium text-slate-500">Week left</span>
+      <span className={`min-w-[4.5rem] text-right text-sm font-semibold tabular-nums ${tone}`}>{label}</span>
+    </div>
+  );
+}
+
+function formatWeekLeft(ms: number, withSeconds: boolean): string {
+  const totalSeconds = Math.floor(Math.max(0, ms) / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const base = `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  return withSeconds ? `${base} ${String(seconds).padStart(2, "0")}s` : base;
+}
+
+function HoursIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 8v4.5l2.5 1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function PlayIcon() {
