@@ -7,7 +7,43 @@ export const CURRENT_USER = "Contractor 1";
 
 export type SessionStatus = "running" | "paused";
 export type ProjectClose = "complete" | "cancelled" | null;
+export type ProjectPriority = "rush" | "standard";
 export type ProjectLabel = "In Progress" | "On Hold" | "Complete" | "Cancelled";
+// Type and Brand are chosen when a project is created. Empty means not set yet.
+export const PROJECT_TYPES = ["Creative", "Admin"] as const;
+export type ProjectType = (typeof PROJECT_TYPES)[number] | "";
+export const PROJECT_BRANDS = [
+  "Trane Residential",
+  "American Standard",
+  "RunTru",
+  "Oxbox",
+  "Ameristar",
+  "Trane Commercial",
+  "Trane Supply",
+  "Thermoking",
+] as const;
+export type ProjectBrand = (typeof PROJECT_BRANDS)[number] | "";
+// Billing account units. The value stored on the project is the label itself.
+export const PROJECT_ACCOUNT_UNITS = [
+  "Creative-CQ55002872-Conference",
+  "Creative-CQ55002872-CustomerCare",
+  "Creative-CQ55002874-Ameristar",
+  "Creative-CQ55002874-AmStd",
+  "Creative-CQ55002874-Handbook",
+  "Creative-CQ55002874-Home-AmStd",
+  "Creative-CQ55002874-Home-Trane",
+  "Creative-CQ55002874-Lowe's",
+  "Creative-CQ55002874-MAX",
+  "Creative-CQ55002874-Oxbox",
+  "Creative-CQ55002874-PIM",
+  "Creative-CQ55002874-RunTru",
+  "Creative-CQ55002874-Trane",
+  "Creative-CQ55002874-Trane Supply",
+  "Creative-CQ55002874-Brand Guidelines",
+  "Creative-CQ55002874-ThermoKing",
+  "Creative-CQ55002874-EPG",
+] as const;
+export type ProjectAccountUnit = (typeof PROJECT_ACCOUNT_UNITS)[number] | "";
 
 export type DayHours = {
   date: string; // YYYY-MM-DD in local time
@@ -30,31 +66,66 @@ export type Project = {
   id: string;
   name: string;
   description: string;
+  // Free-form notes kept with the project. Blank until someone writes them.
+  notes: string;
   wrikeNumber: string;
+  // Optional product SKU. Blank is allowed.
+  sku: string;
+  // Optional Coupa purchase number. Blank is allowed.
+  coupaNumber: string;
+  // Who to reach at the customer for this job.
+  customerContact: string;
+  // Rush jobs jump the queue. Standard is the default for older projects.
+  priority: ProjectPriority;
+  // Creative or Admin. Blank on projects created before the dropdown existed.
+  type: ProjectType;
+  brand: ProjectBrand;
+  // One of PROJECT_ACCOUNT_UNITS. Blank until someone picks a unit.
+  accountUnitId: ProjectAccountUnit;
+  // Time on this project can be billed. Older projects stay unchecked.
+  billable: boolean;
+  // Max hours allowed on the project. Null until someone sets a cap.
+  allottedHours: number | null;
   ihDate: string;
+  // ISO time the project was created. Empty on rows saved before this field existed.
+  createdAt: string;
   close: ProjectClose;
   sessions: WorkSession[];
 };
 
-// One export line: who worked, which day, which project, how long.
+// One export line: who worked, which day, which project, and the billing fields copied from that project.
 export type TimeLine = {
   person: string;
   date: string;
   project: string;
+  wrikeNumber: string;
+  customerContact: string;
+  sku: string;
   ms: number;
+  billable: boolean;
 };
 
 const STORAGE_KEY = "smart-projects";
 const MINUTE = 60 * 1000;
-const HOUR = 60 * MINUTE;
 
 export const SEED_PROJECTS: Project[] = [
   {
     id: "seed-brochure",
     name: "Brochure reprint",
     description: "",
+    notes: "",
     wrikeNumber: "",
+    sku: "",
+    coupaNumber: "",
+    customerContact: "",
+    priority: "standard",
+    type: "",
+    brand: "",
+    accountUnitId: "",
+    billable: false,
+    allottedHours: null,
     ihDate: "2026-09-18",
+    createdAt: "2026-09-18T13:00:00.000Z",
     close: null,
     sessions: [
       {
@@ -76,8 +147,19 @@ export const SEED_PROJECTS: Project[] = [
     id: "seed-posters",
     name: "Dealer posters",
     description: "",
+    notes: "",
     wrikeNumber: "",
+    sku: "",
+    coupaNumber: "",
+    customerContact: "",
+    priority: "standard",
+    type: "",
+    brand: "",
+    accountUnitId: "",
+    billable: false,
+    allottedHours: null,
     ihDate: "2026-09-22",
+    createdAt: "2026-09-22T13:00:00.000Z",
     close: null,
     sessions: [
       {
@@ -104,8 +186,19 @@ export const SEED_PROJECTS: Project[] = [
     id: "seed-banners",
     name: "Banner stands",
     description: "",
+    notes: "",
     wrikeNumber: "",
+    sku: "",
+    coupaNumber: "",
+    customerContact: "",
+    priority: "standard",
+    type: "",
+    brand: "",
+    accountUnitId: "",
+    billable: false,
+    allottedHours: null,
     ihDate: "2026-09-26",
+    createdAt: "2026-09-26T13:00:00.000Z",
     close: null,
     sessions: [
       {
@@ -213,6 +306,43 @@ export function localDateKey(at: number): string {
   return `${y}-${m}-${day}`;
 }
 
+// The My hours popup looks at one of these windows around "now".
+export type HoursSpan = "day" | "week" | "month";
+
+// Inclusive local dates. Week is Monday through Sunday. Month is the calendar month.
+export function hoursSpanRange(span: HoursSpan, at: number): { from: string; to: string } {
+  const day = new Date(at);
+  day.setHours(12, 0, 0, 0);
+  if (span === "day") {
+    const key = localDateKey(day.getTime());
+    return { from: key, to: key };
+  }
+  if (span === "week") {
+    const weekday = day.getDay();
+    const monday = new Date(day);
+    monday.setDate(day.getDate() - (weekday === 0 ? 6 : weekday - 1));
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return { from: localDateKey(monday.getTime()), to: localDateKey(sunday.getTime()) };
+  }
+  const first = new Date(day.getFullYear(), day.getMonth(), 1, 12);
+  const last = new Date(day.getFullYear(), day.getMonth() + 1, 0, 12);
+  return { from: localDateKey(first.getTime()), to: localDateKey(last.getTime()) };
+}
+
+// Every local date from `from` through `to`, inclusive. Noon keeps daylight-saving days stable.
+export function eachDate(from: string, to: string): string[] {
+  const dates: string[] = [];
+  const cursor = new Date(`${from}T12:00:00`);
+  const end = new Date(`${to}T12:00:00`);
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime())) return dates;
+  while (cursor.getTime() <= end.getTime()) {
+    dates.push(localDateKey(cursor.getTime()));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
 function startOfNextLocalDay(at: number): number {
   const d = new Date(at);
   d.setHours(24, 0, 0, 0);
@@ -254,10 +384,21 @@ export function timeLines(projects: Project[], now: number): TimeLine[] {
     for (const session of project.sessions) {
       for (const entry of sessionDays(session, now)) {
         if (entry.ms <= 0) continue;
-        const key = `${session.person}\0${entry.date}\0${project.name}`;
+        const key = `${session.person}\0${entry.date}\0${project.id}`;
         const prior = map.get(key);
         if (prior) prior.ms += entry.ms;
-        else map.set(key, { person: session.person, date: entry.date, project: project.name, ms: entry.ms });
+        else {
+          map.set(key, {
+            person: session.person,
+            date: entry.date,
+            project: project.name,
+            wrikeNumber: project.wrikeNumber,
+            customerContact: project.customerContact,
+            sku: project.sku,
+            ms: entry.ms,
+            billable: project.billable,
+          });
+        }
       }
     }
   }
@@ -268,8 +409,9 @@ export function timeLines(projects: Project[], now: number): TimeLine[] {
   });
 }
 
-export function hoursDecimal(ms: number): number {
-  return Math.round((ms / HOUR) * 100) / 100;
+// The Hours export bills whole minutes. The on-screen clock still shows hours and minutes.
+export function reportMinutes(ms: number): number {
+  return Math.round(ms / MINUTE);
 }
 
 // Freeze worked time and start the pause clock. An existing pause is left alone.
@@ -322,7 +464,22 @@ function stopSession(session: WorkSession, now: number): WorkSession {
 export function updateProject(
   projects: Project[],
   projectId: string,
-  patch: { name: string; description: string; wrikeNumber: string; ihDate: string },
+  patch: {
+    name: string;
+    description: string;
+    notes: string;
+    wrikeNumber: string;
+    sku: string;
+    coupaNumber: string;
+    customerContact: string;
+    priority: ProjectPriority;
+    type: ProjectType;
+    brand: ProjectBrand;
+    accountUnitId: ProjectAccountUnit;
+    billable: boolean;
+    allottedHours: number | null;
+    ihDate: string;
+  },
 ): Project[] {
   return projects.map((project) => (project.id === projectId ? { ...project, ...patch } : project));
 }
@@ -403,11 +560,40 @@ function normalizeProject(value: unknown): Project | null {
     id: row.id,
     name: row.name,
     description: typeof row.description === "string" ? row.description : "",
+    notes: typeof row.notes === "string" ? row.notes : "",
     wrikeNumber: typeof row.wrikeNumber === "string" ? row.wrikeNumber : "",
+    sku: typeof row.sku === "string" ? row.sku : "",
+    coupaNumber: typeof row.coupaNumber === "string" ? row.coupaNumber : "",
+    customerContact: typeof row.customerContact === "string" ? row.customerContact : "",
+    priority: row.priority === "rush" ? "rush" : "standard",
+    type: listedValue(row.type, PROJECT_TYPES),
+    brand: listedValue(row.brand, PROJECT_BRANDS),
+    accountUnitId: listedValue(row.accountUnitId, PROJECT_ACCOUNT_UNITS),
+    billable: row.billable === true,
+    allottedHours: allottedHoursFrom(row.allottedHours),
     ihDate: row.ihDate,
+    createdAt: createdAtFrom(row.createdAt, row.ihDate),
     close,
     sessions,
   };
+}
+
+function listedValue<T extends string>(value: unknown, allowed: readonly T[]): T | "" {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : "";
+}
+
+function allottedHoursFrom(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const hours = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(hours) || hours < 0) return null;
+  return Math.round(hours * 100) / 100;
+}
+
+function createdAtFrom(value: unknown, ihDate: string): string {
+  if (typeof value === "string" && !Number.isNaN(Date.parse(value))) return value;
+  // Projects saved before this field existed use the IH date so Created still has a time.
+  const fallback = new Date(`${ihDate}T12:00:00`);
+  return Number.isNaN(fallback.getTime()) ? "" : fallback.toISOString();
 }
 
 function normalizeDay(value: unknown): DayHours | null {

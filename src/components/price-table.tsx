@@ -36,7 +36,6 @@ import {
 } from "@/lib/prices";
 
 type ChargeSide = "wholesale" | "retail";
-type ChargeView = { price: Price; side: ChargeSide };
 
 // Short names for the hover panel. The form dropdown keeps the longer billing hint.
 const EXTRA_TIP_LABELS: Record<ExtraType, { name: string; hint: string }> = {
@@ -92,8 +91,6 @@ export function PriceTable() {
   const [formSession, setFormSession] = useState(0);
   const [editing, setEditing] = useState<Price | null>(null);
   const [formOpen, setFormOpen] = useState(false);
-  // Clicking wholesale or retail opens that side's charge breakdown.
-  const [charges, setCharges] = useState<ChargeView | null>(null);
 
   const filtered = prices.filter((price) => {
     if (!showInactive && !price.active) return false;
@@ -348,14 +345,10 @@ export function PriceTable() {
                     </td>
                     <td className={`${priceCell} whitespace-nowrap`}>{price.sku}</td>
                     <td className={priceCell}>
-                      <ChargeButton price={price} onOpen={() => setCharges({ price, side: "wholesale" })} />
+                      <ChargeButton price={price} />
                     </td>
                     <td className={priceCell}>
-                      <ChargeButton
-                        price={price}
-                        side="retail"
-                        onOpen={() => setCharges({ price, side: "retail" })}
-                      />
+                      <ChargeButton price={price} side="retail" />
                     </td>
                     <td className={`${priceCell} tabular-nums`}>{formatMoney(gpmDollars(base.wholesale, base.retail))}</td>
                     <td className={`${priceCell} tabular-nums`}>
@@ -369,20 +362,6 @@ export function PriceTable() {
         </table>
         </div>
       </section>
-
-      {charges ? (
-        <ChargeDialog
-          price={prices.find((item) => item.id === charges.price.id) ?? charges.price}
-          side={charges.side}
-          onClose={() => setCharges(null)}
-          onSizeUpcharges={(sizeUpcharges) => {
-            const next = prices.map((item) =>
-              item.id === charges.price.id ? { ...item, sizeUpcharges } : item,
-            );
-            replacePrices(next);
-          }}
-        />
-      ) : null}
 
       {formOpen ? (
         <PriceFormDialog
@@ -496,28 +475,81 @@ function priceScope(
   return label;
 }
 
-// The cell shows the lowest quantity. A click opens that side's charge breakdown.
+// The cell shows the lowest quantity. Hover lists that side's breaks, and extras when there are any.
 export function ChargeButton({
   price,
   side = "wholesale",
-  onOpen,
 }: {
   price: Price;
   side?: ChargeSide;
-  onOpen: () => void;
 }) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [place, setPlace] = useState<{ top: number; left: number; above: boolean } | null>(null);
   const base = baseBreak(price);
   const value = formatMoney(side === "wholesale" ? base.wholesale : base.retail);
   const sideLabel = side === "wholesale" ? "Wholesale" : "Retail";
+  const breaks = sortBreaks(price.breaks);
+  const extras = price.extras;
+
+  function money(item: { wholesale: number; retail: number }) {
+    return formatMoney(side === "wholesale" ? item.wholesale : item.retail);
+  }
+
+  function show() {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const above = rect.bottom + 140 > window.innerHeight && rect.top > 140;
+    setPlace({
+      top: above ? rect.top - 8 : rect.bottom + 8,
+      left: rect.left + rect.width / 2,
+      above,
+    });
+  }
+
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="tabular-nums text-[#0f2c4c] underline-offset-2 hover:underline"
-      aria-label={`${sideLabel} charges for ${price.name}`}
-    >
-      {value}
-    </button>
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="tabular-nums underline decoration-dotted decoration-slate-400 underline-offset-4"
+        aria-label={`${sideLabel} for ${price.name}`}
+        onMouseEnter={show}
+        onMouseLeave={() => setPlace(null)}
+        onFocus={show}
+        onBlur={() => setPlace(null)}
+      >
+        {value}
+      </button>
+      {place ? (
+        <div
+          role="tooltip"
+          style={{
+            top: place.top,
+            left: place.left,
+            transform: place.above ? "translate(-50%, -100%)" : "translate(-50%, 0)",
+          }}
+          className="fixed z-50 w-max min-w-36 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-700 shadow-lg"
+        >
+          {breaks.map((item, index) => (
+            <p key={item.qty} className={`flex justify-between gap-4 whitespace-nowrap tabular-nums ${index > 0 ? "mt-1" : ""}`}>
+              <span>Qty {item.qty}</span>
+              <span>{money(item)}</span>
+            </p>
+          ))}
+          {extras.length > 0 ? (
+            <>
+              <p className="mb-1 mt-2 font-medium text-slate-500">Extras</p>
+              {extras.map((item, index) => (
+                <p key={`${item.type}-${index}`} className={`flex justify-between gap-4 whitespace-nowrap tabular-nums ${index > 0 ? "mt-1" : ""}`}>
+                  <span>{EXTRA_TIP_LABELS[item.type].name}</span>
+                  <span>{money(item)}</span>
+                </p>
+              ))}
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </>
   );
 }
 

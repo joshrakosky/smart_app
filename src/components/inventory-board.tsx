@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { InventoryReorderDialog } from "@/components/inventory-reorder-dialog";
 import { PriceFormDialog } from "@/components/price-form-dialog";
 import { ProductNotes } from "@/components/product-notes";
-import { ChargeButton, ChargeDialog } from "@/components/price-table";
+import { ChargeButton } from "@/components/price-table";
 import { BRANDS, type Brand } from "@/lib/brands";
 import { formatMoney } from "@/lib/money";
 import { enqueueOnboarding, enqueueOnboardingNote, queueKindForSave } from "@/lib/onboarding";
@@ -45,7 +45,6 @@ import {
 import { STAKEHOLDERS } from "@/lib/stakeholders";
 
 type TableMode = "inventory" | "pricing";
-type ChargeSide = "wholesale" | "retail";
 
 // One row is an inventory item, a product, or both when the SKU matches.
 type ProductRow = {
@@ -111,7 +110,6 @@ export function InventoryBoard({
   const [prefill, setPrefill] = useState<{ name: string; sku: string; stakeholderId: number } | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [formSession, setFormSession] = useState(0);
-  const [charges, setCharges] = useState<{ price: Price; side: ChargeSide } | null>(null);
   const bulkRef = useRef<HTMLDialogElement>(null);
   const [bulkStep, setBulkStep] = useState<"edit" | "confirm">("edit");
   const [bulkActive, setBulkActive] = useState<"no-change" | "true" | "false">("no-change");
@@ -394,7 +392,6 @@ export function InventoryBoard({
                       onToggle={() => toggleSelected(row.key)}
                       onEdit={() => openProduct(row)}
                       onReorder={(before, after) => enqueueOnboardingNote(queuePrice(row), `Reorder point: ${before} → ${after}`)}
-                      onCharge={(side) => row.price && setCharges({ price: row.price, side })}
                     />
                   ))
                 )}
@@ -421,19 +418,6 @@ export function InventoryBoard({
           ) : null}
         </section>
       </main>
-
-      {charges ? (
-        <ChargeDialog
-          price={prices.find((item) => item.id === charges.price.id) ?? charges.price}
-          side={charges.side}
-          onClose={() => setCharges(null)}
-          onSizeUpcharges={(sizeUpcharges) => {
-            replacePrices(
-              prices.map((item) => (item.id === charges.price.id ? { ...item, sizeUpcharges } : item)),
-            );
-          }}
-        />
-      ) : null}
 
       {formOpen ? (
         <PriceFormDialog
@@ -636,7 +620,6 @@ function ProductTableRow({
   onToggle,
   onEdit,
   onReorder,
-  onCharge,
 }: {
   row: ProductRow;
   mode: TableMode;
@@ -645,7 +628,6 @@ function ProductTableRow({
   onToggle: () => void;
   onEdit: () => void;
   onReorder: (before: number, after: number) => void;
-  onCharge: (side: ChargeSide) => void;
 }) {
   const item = row.inventory;
   const [draft, setDraft] = useState(item ? String(item.reorder) : "");
@@ -735,11 +717,11 @@ function ProductTableRow({
       ) : row.price && base ? (
         <>
           <td className={bodyCell}>
-            <ChargeButton price={row.price} onOpen={() => onCharge("wholesale")} />
+            <ChargeButton price={row.price} />
           </td>
           <td className={`${bodyCell} tabular-nums`}>{formatGpmPercent(margin)}</td>
           <td className={bodyCell}>
-            <ChargeButton price={row.price} side="retail" onOpen={() => onCharge("retail")} />
+            <ChargeButton price={row.price} side="retail" />
           </td>
           <td className={`${bodyCell} tabular-nums`}>
             {formatMoney(gpmDollars(base.wholesale, base.retail))}

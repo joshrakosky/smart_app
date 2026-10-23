@@ -1,11 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { formatSlashDate } from "@/lib/money";
 import {
+  downloadProjectAsset,
+  formatAssetSize,
+  loadProjectAssets,
+  MAX_PROJECT_ASSET_BYTES,
+  readProjectAsset,
+  saveProjectAssets,
+  type ProjectAsset,
+} from "@/lib/project-assets";
+import {
   closeProject,
+  CURRENT_USER,
+  eachDate,
   formatDuration,
   getProjectsServerSnapshot,
+  hoursSpanRange,
+  type HoursSpan,
   getProjectsSnapshot,
   pauseProject,
   projectStatus,
@@ -15,9 +28,17 @@ import {
   startProject,
   stopProject,
   subscribeProjects,
+  timeLines,
   updateProject,
   userSession,
+  PROJECT_ACCOUNT_UNITS,
+  PROJECT_BRANDS,
+  PROJECT_TYPES,
   type Project,
+  type ProjectAccountUnit,
+  type ProjectBrand,
+  type ProjectPriority,
+  type ProjectType,
   type WorkSession,
 } from "@/lib/time-clock";
 
@@ -43,22 +64,46 @@ const dangerButton = "h-10 rounded-lg bg-red-600 px-4 text-sm font-medium text-w
 
 type ClockConfirm = { project: Project; action: "complete" | "cancelled" | "stop" };
 
-// Hours is a project list. The + button creates a project. Row icons track the signed-in contractor.
+// Hours is a project list. My hours is this person's time. The + button creates a project.
 export function TimeClock() {
   const projects = useSyncExternalStore(subscribeProjects, getProjectsSnapshot, getProjectsServerSnapshot);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const hoursRef = useRef<HTMLDialogElement>(null);
   const [now, setNow] = useState(0);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [notes, setNotes] = useState("");
+  const [assets, setAssets] = useState<ProjectAsset[]>([]);
   const [wrikeNumber, setWrikeNumber] = useState("");
+  const [sku, setSku] = useState("");
+  const [coupaNumber, setCoupaNumber] = useState("");
+  const [customerContact, setCustomerContact] = useState("");
+  const [priority, setPriority] = useState<ProjectPriority>("standard");
+  const [projectType, setProjectType] = useState<ProjectType>("");
+  const [brand, setBrand] = useState<ProjectBrand>("");
+  const [accountUnitId, setAccountUnitId] = useState<ProjectAccountUnit>("");
+  const [billable, setBillable] = useState(false);
+  const [allottedHours, setAllottedHours] = useState("");
   const [ihDate, setIhDate] = useState("");
+  const [createTab, setCreateTab] = useState<ProjectFormTab>("details");
   const [formError, setFormError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Project | null>(null);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editAssets, setEditAssets] = useState<ProjectAsset[]>([]);
   const [editWrikeNumber, setEditWrikeNumber] = useState("");
+  const [editSku, setEditSku] = useState("");
+  const [editCoupaNumber, setEditCoupaNumber] = useState("");
+  const [editCustomerContact, setEditCustomerContact] = useState("");
+  const [editPriority, setEditPriority] = useState<ProjectPriority>("standard");
+  const [editType, setEditType] = useState<ProjectType>("");
+  const [editBrand, setEditBrand] = useState<ProjectBrand>("");
+  const [editAccountUnitId, setEditAccountUnitId] = useState<ProjectAccountUnit>("");
+  const [editBillable, setEditBillable] = useState(false);
+  const [editAllottedHours, setEditAllottedHours] = useState("");
   const [editIhDate, setEditIhDate] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ClockConfirm | null>(null);
@@ -84,7 +129,7 @@ export function TimeClock() {
   const needle = query.trim().toLowerCase();
   const visible = needle
     ? selected.filter((project) => {
-        const haystack = `${project.name} ${project.description} ${project.wrikeNumber}`.toLowerCase();
+        const haystack = `${project.name} ${project.description} ${project.notes} ${project.wrikeNumber} ${project.sku} ${project.coupaNumber} ${project.customerContact} ${priorityLabel(project.priority)}`.toLowerCase();
         return haystack.includes(needle);
       })
     : selected;
@@ -92,8 +137,20 @@ export function TimeClock() {
   function openCreate() {
     setName("");
     setDescription("");
+    setNotes("");
+    setAssets([]);
     setWrikeNumber("");
+    setSku("");
+    setCoupaNumber("");
+    setCustomerContact("");
+    setPriority("standard");
+    setProjectType("");
+    setBrand("");
+    setAccountUnitId("");
+    setBillable(false);
+    setAllottedHours("");
     setIhDate("");
+    setCreateTab("details");
     setFormError(null);
     dialogRef.current?.showModal();
   }
@@ -101,21 +158,47 @@ export function TimeClock() {
   function createProject() {
     const nextName = name.trim();
     if (!nextName) {
+      setCreateTab("details");
       setFormError("Enter a project name.");
       return;
     }
     if (!ihDate) {
+      setCreateTab("details");
       setFormError("Choose an IH date.");
+      return;
+    }
+    const allotted = parseAllottedHours(allottedHours);
+    if (allotted === "invalid") {
+      setCreateTab("billing");
+      setFormError("Allotted hours needs to be zero or greater, or left blank.");
+      return;
+    }
+    const id = crypto.randomUUID();
+    const assetError = saveProjectAssets(id, assets);
+    if (assetError) {
+      setCreateTab("assets");
+      setFormError(assetError);
       return;
     }
     replaceProjects([
       ...projects,
       {
-        id: crypto.randomUUID(),
+        id,
         name: nextName,
         description: description.trim(),
+        notes: notes.trim(),
         wrikeNumber: wrikeNumber.trim(),
+        sku: sku.trim(),
+        coupaNumber: coupaNumber.trim(),
+        customerContact: customerContact.trim(),
+        priority,
+        type: projectType,
+        brand,
+        accountUnitId,
+        billable,
+        allottedHours: allotted,
         ihDate,
+        createdAt: new Date().toISOString(),
         close: null,
         sessions: [],
       },
@@ -127,7 +210,18 @@ export function TimeClock() {
     setEditing(project);
     setEditName(project.name);
     setEditDescription(project.description);
+    setEditNotes(project.notes);
+    setEditAssets(loadProjectAssets(project.id));
     setEditWrikeNumber(project.wrikeNumber);
+    setEditSku(project.sku);
+    setEditCoupaNumber(project.coupaNumber);
+    setEditCustomerContact(project.customerContact);
+    setEditPriority(project.priority);
+    setEditType(project.type);
+    setEditBrand(project.brand);
+    setEditAccountUnitId(project.accountUnitId);
+    setEditBillable(project.billable);
+    setEditAllottedHours(project.allottedHours == null ? "" : String(project.allottedHours));
     setEditIhDate(project.ihDate);
     setEditError(null);
   }
@@ -143,11 +237,31 @@ export function TimeClock() {
       setEditError("Choose an IH date.");
       return;
     }
+    const allotted = parseAllottedHours(editAllottedHours);
+    if (allotted === "invalid") {
+      setEditError("Allotted hours needs to be zero or greater, or left blank.");
+      return;
+    }
+    const assetError = saveProjectAssets(editing.id, editAssets);
+    if (assetError) {
+      setEditError(assetError);
+      return;
+    }
     replaceProjects(
       updateProject(projects, editing.id, {
         name: nextName,
         description: editDescription.trim(),
+        notes: editNotes.trim(),
         wrikeNumber: editWrikeNumber.trim(),
+        sku: editSku.trim(),
+        coupaNumber: editCoupaNumber.trim(),
+        customerContact: editCustomerContact.trim(),
+        priority: editPriority,
+        type: editType,
+        brand: editBrand,
+        accountUnitId: editAccountUnitId,
+        billable: editBillable,
+        allottedHours: allotted,
         ihDate: editIhDate,
       }),
     );
@@ -214,27 +328,35 @@ export function TimeClock() {
             </select>
           </label>
         </div>
-        <button type="button" onClick={openCreate} aria-label="New project" className={addButton}>
-          +
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button type="button" onClick={() => hoursRef.current?.showModal()} className={outlineButton}>
+            My hours
+          </button>
+          <button type="button" onClick={openCreate} aria-label="New project" className={addButton}>
+            +
+          </button>
+        </div>
       </div>
 
       <div className="h-[416px] overflow-auto">
-        <table className="w-full min-w-[52rem] border-separate border-spacing-0 text-center text-sm">
+        <table className="w-full min-w-[64rem] border-separate border-spacing-0 text-center text-sm">
           <thead className="text-slate-600">
             <tr>
               <th className={headerCell}>Project</th>
               <th className={headerCell}>Wrike #</th>
+              <th className={headerCell}>Customer Contact</th>
+              <th className={headerCell}>Priority</th>
               <th className={headerCell}>IH Dates</th>
               <th className={headerCell}>Status</th>
               <th className={headerCell}>Time</th>
+              <th className={headerCell}>Allotted</th>
               <th className={headerCell}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {visible.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-slate-500" colSpan={6}>
+                <td className="px-4 py-6 text-slate-500" colSpan={9}>
                   {needle ? "No projects match that search." : "No projects yet."}
                 </td>
               </tr>
@@ -258,6 +380,8 @@ export function TimeClock() {
                       </button>
                     </td>
                     <td className={cell}>{project.wrikeNumber || "—"}</td>
+                    <td className={cell}>{project.customerContact || "—"}</td>
+                    <td className={cell}>{priorityLabel(project.priority)}</td>
                     <td className={`${cell} tabular-nums`}>{formatSlashDate(project.ihDate)}</td>
                     <td className={cell}>
                       <StatusHover status={status} sessions={project.sessions} />
@@ -273,6 +397,7 @@ export function TimeClock() {
                         </span>
                       </div>
                     </td>
+                    <td className={`${cell} tabular-nums`}>{formatAllotted(project.allottedHours)}</td>
                     <td className={cell}>
                       {(() => {
                         const running = mine?.status === "running";
@@ -316,9 +441,11 @@ export function TimeClock() {
         </table>
       </div>
 
+      <MyHoursDialog dialogRef={hoursRef} projects={projects} now={now} />
+
       <dialog
         ref={dialogRef}
-        className="m-auto h-fit w-[min(28rem,calc(100%-2rem))] rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-lg backdrop:bg-slate-900/40"
+        className="m-auto max-h-[calc(100%-2rem)] w-[min(28rem,calc(100%-2rem))] overflow-y-auto rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-lg backdrop:bg-slate-900/40"
         aria-labelledby="new-project-title"
       >
         <form
@@ -341,44 +468,43 @@ export function TimeClock() {
               ×
             </button>
           </div>
-          <label className="flex flex-col gap-1 text-sm" htmlFor="project-name">
-            <span className="font-medium text-slate-700">Project name</span>
-            <input
-              id="project-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor="project-description">
-            <span className="font-medium text-slate-700">Description</span>
-            <textarea
-              id="project-description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              rows={3}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor="project-wrike">
-            <span className="font-medium text-slate-700">Wrike #</span>
-            <input
-              id="project-wrike"
-              value={wrikeNumber}
-              onChange={(event) => setWrikeNumber(event.target.value)}
-              className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor="project-ih-date">
-            <span className="font-medium text-slate-700">IH Dates</span>
-            <input
-              id="project-ih-date"
-              type="date"
-              value={ihDate}
-              onChange={(event) => setIhDate(event.target.value)}
-              className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900"
-            />
-          </label>
+          <ProjectFormFields
+            idPrefix="project"
+            tab={createTab}
+            onTab={setCreateTab}
+            name={name}
+            description={description}
+            notes={notes}
+            wrikeNumber={wrikeNumber}
+            sku={sku}
+            coupaNumber={coupaNumber}
+            customerContact={customerContact}
+            priority={priority}
+            projectType={projectType}
+            brand={brand}
+            accountUnitId={accountUnitId}
+            billable={billable}
+            allottedHours={allottedHours}
+            ihDate={ihDate}
+            ihDateLabel="IH Dates"
+            createdAt=""
+            assets={assets}
+            onAssets={setAssets}
+            onName={setName}
+            onDescription={setDescription}
+            onNotes={setNotes}
+            onWrikeNumber={setWrikeNumber}
+            onSku={setSku}
+            onCoupaNumber={setCoupaNumber}
+            onCustomerContact={setCustomerContact}
+            onPriority={setPriority}
+            onType={setProjectType}
+            onBrand={setBrand}
+            onAccountUnitId={setAccountUnitId}
+            onBillable={setBillable}
+            onAllottedHours={setAllottedHours}
+            onIhDate={setIhDate}
+          />
           {formError ? <p className="text-sm text-red-700">{formError}</p> : null}
           <button
             type="submit"
@@ -393,13 +519,36 @@ export function TimeClock() {
         <ProjectEditDialog
           name={editName}
           description={editDescription}
+          notes={editNotes}
           wrikeNumber={editWrikeNumber}
+          sku={editSku}
+          coupaNumber={editCoupaNumber}
+          customerContact={editCustomerContact}
+          priority={editPriority}
+          projectType={editType}
+          brand={editBrand}
+          accountUnitId={editAccountUnitId}
+          billable={editBillable}
+          allottedHours={editAllottedHours}
           ihDate={editIhDate}
+          createdAt={editing.createdAt}
+          assets={editAssets}
+          onAssets={setEditAssets}
           error={editError}
           closed={editing.close != null}
           onName={setEditName}
           onDescription={setEditDescription}
+          onNotes={setEditNotes}
           onWrikeNumber={setEditWrikeNumber}
+          onSku={setEditSku}
+          onCoupaNumber={setEditCoupaNumber}
+          onCustomerContact={setEditCustomerContact}
+          onPriority={setEditPriority}
+          onType={setEditType}
+          onBrand={setEditBrand}
+          onAccountUnitId={setEditAccountUnitId}
+          onBillable={setEditBillable}
+          onAllottedHours={setEditAllottedHours}
           onIhDate={setEditIhDate}
           onClose={() => setEditing(null)}
           onSave={saveEdit}
@@ -421,6 +570,133 @@ export function TimeClock() {
       ) : null}
     </section>
   );
+}
+
+// This person's worked time for today, this week, or this month. Other people stay off this list.
+function MyHoursDialog({
+  dialogRef,
+  projects,
+  now,
+}: {
+  dialogRef: RefObject<HTMLDialogElement | null>;
+  projects: Project[];
+  now: number;
+}) {
+  const [span, setSpan] = useState<HoursSpan>("week");
+  // now stays 0 until a clock is ticking, so the range uses the open time instead.
+  const [mountedAt, setMountedAt] = useState(0);
+
+  useEffect(() => {
+    setMountedAt(Date.now());
+  }, []);
+
+  const at = now > 0 ? now : mountedAt;
+  const range = at > 0 ? hoursSpanRange(span, at) : { from: "", to: "" };
+  const lines =
+    at > 0
+      ? timeLines(projects, at).filter(
+          (line) => line.person === CURRENT_USER && line.date >= range.from && line.date <= range.to,
+        )
+      : [];
+  const total = lines.reduce((sum, line) => sum + line.ms, 0);
+  // A week shows every weekday. A day or month shows only days that have time.
+  const dates =
+    span === "week" && range.from ? eachDate(range.from, range.to) : [...new Set(lines.map((line) => line.date))];
+  const rangeLabel = !range.from
+    ? "—"
+    : range.from === range.to
+      ? formatSlashDate(range.from)
+      : `${formatSlashDate(range.from)} – ${formatSlashDate(range.to)}`;
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="my-hours-title"
+      className="m-auto max-h-[calc(100%-2rem)] w-[min(24rem,calc(100%-2rem))] overflow-y-auto rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-lg backdrop:bg-slate-900/40"
+    >
+      <div className="flex flex-col gap-4 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 id="my-hours-title" className="text-lg font-semibold">
+              My hours
+            </h2>
+            <p className="text-sm text-slate-500">{CURRENT_USER}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => dialogRef.current?.close()}
+            className="text-xl leading-none text-slate-500"
+          >
+            ×
+          </button>
+        </div>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <label className="flex flex-col gap-1 text-sm" htmlFor="my-hours-span">
+            <span className="font-medium text-slate-700">Show</span>
+            <select
+              id="my-hours-span"
+              value={span}
+              onChange={(event) => setSpan(event.target.value as HoursSpan)}
+              className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900"
+            >
+              <option value="day">Day</option>
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+            </select>
+          </label>
+          <p className="pb-2 text-sm tabular-nums text-slate-600">{rangeLabel}</p>
+        </div>
+        <p className="flex items-baseline justify-between border-b border-slate-200 pb-3 text-sm">
+          <span className="font-medium text-slate-700">Total</span>
+          <span className="text-lg font-semibold tabular-nums text-[#0f2c4c]">{formatSpent(total)}</span>
+        </p>
+        {dates.length === 0 ? (
+          <p className="text-sm text-slate-500">No time in this range.</p>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {dates.map((date) => {
+              const dayLines = lines.filter((line) => line.date === date);
+              const dayMs = dayLines.reduce((sum, line) => sum + line.ms, 0);
+              return (
+                <li key={date}>
+                  <div className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="font-medium text-slate-800">
+                      {weekdayLabel(date)} {formatSlashDate(date)}
+                    </span>
+                    <span className="tabular-nums text-slate-700">{formatSpent(dayMs)}</span>
+                  </div>
+                  {dayLines.length > 0 ? (
+                    <ul className="mt-1 flex flex-col gap-1">
+                      {dayLines.map((line) => (
+                        <li
+                          key={`${line.date}-${line.project}`}
+                          className="flex items-baseline justify-between gap-3 pl-3 text-sm text-slate-600"
+                        >
+                          <span className="min-w-0 truncate">{line.project}</span>
+                          <span className="shrink-0 tabular-nums">{formatSpent(line.ms)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </dialog>
+  );
+}
+
+function weekdayLabel(date: string): string {
+  return new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { weekday: "short" });
+}
+
+// A few seconds still counts. The clock label would otherwise round that down to 0m.
+function formatSpent(ms: number): string {
+  if (ms > 0 && ms < 60_000) return "< 1m";
+  return formatDuration(ms);
 }
 
 // Hover the row status to see who else is on the project and whether they are running or paused.
@@ -464,13 +740,36 @@ function StatusHover({ status, sessions }: { status: string; sessions: WorkSessi
 function ProjectEditDialog({
   name,
   description,
+  notes,
   wrikeNumber,
+  sku,
+  coupaNumber,
+  customerContact,
+  priority,
+  projectType,
+  brand,
+  accountUnitId,
+  billable,
+  allottedHours,
   ihDate,
+  createdAt,
+  assets,
+  onAssets,
   error,
   closed,
   onName,
   onDescription,
+  onNotes,
   onWrikeNumber,
+  onSku,
+  onCoupaNumber,
+  onCustomerContact,
+  onPriority,
+  onType,
+  onBrand,
+  onAccountUnitId,
+  onBillable,
+  onAllottedHours,
   onIhDate,
   onClose,
   onSave,
@@ -479,13 +778,36 @@ function ProjectEditDialog({
 }: {
   name: string;
   description: string;
+  notes: string;
   wrikeNumber: string;
+  sku: string;
+  coupaNumber: string;
+  customerContact: string;
+  priority: ProjectPriority;
+  projectType: ProjectType;
+  brand: ProjectBrand;
+  accountUnitId: ProjectAccountUnit;
+  billable: boolean;
+  allottedHours: string;
   ihDate: string;
+  createdAt: string;
+  assets: ProjectAsset[];
+  onAssets: (assets: ProjectAsset[]) => void;
   error: string | null;
   closed: boolean;
   onName: (value: string) => void;
   onDescription: (value: string) => void;
+  onNotes: (value: string) => void;
   onWrikeNumber: (value: string) => void;
+  onSku: (value: string) => void;
+  onCoupaNumber: (value: string) => void;
+  onCustomerContact: (value: string) => void;
+  onPriority: (value: ProjectPriority) => void;
+  onType: (value: ProjectType) => void;
+  onBrand: (value: ProjectBrand) => void;
+  onAccountUnitId: (value: ProjectAccountUnit) => void;
+  onBillable: (value: boolean) => void;
+  onAllottedHours: (value: string) => void;
   onIhDate: (value: string) => void;
   onClose: () => void;
   onSave: () => void;
@@ -493,6 +815,7 @@ function ProjectEditDialog({
   onCancelProject: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const [tab, setTab] = useState<ProjectFormTab>("details");
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -500,6 +823,14 @@ function ProjectEditDialog({
     dialog.showModal();
     return () => dialog.close();
   }, []);
+
+  // Name and IH date are on Details. Allotted hours is on Billing. File size errors are on Assets.
+  useEffect(() => {
+    if (!error) return;
+    if (error.startsWith("Allotted")) setTab("billing");
+    else if (error.startsWith("Those files")) setTab("assets");
+    else setTab("details");
+  }, [error]);
 
   return (
     <dialog
@@ -509,7 +840,7 @@ function ProjectEditDialog({
         event.preventDefault();
         onClose();
       }}
-      className="m-auto w-[min(28rem,calc(100%-2rem))] rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-lg backdrop:bg-slate-900/40"
+      className="m-auto max-h-[calc(100%-2rem)] w-[min(28rem,calc(100%-2rem))] overflow-y-auto rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-lg backdrop:bg-slate-900/40"
     >
       <form
         className="flex flex-col gap-4 p-5"
@@ -526,44 +857,43 @@ function ProjectEditDialog({
             ×
           </button>
         </div>
-        <label className="flex flex-col gap-1 text-sm" htmlFor="edit-project-name">
-          <span className="font-medium text-slate-700">Project name</span>
-          <input
-            id="edit-project-name"
-            value={name}
-            onChange={(event) => onName(event.target.value)}
-            className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm" htmlFor="edit-project-description">
-          <span className="font-medium text-slate-700">Description</span>
-          <textarea
-            id="edit-project-description"
-            value={description}
-            onChange={(event) => onDescription(event.target.value)}
-            rows={3}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm" htmlFor="edit-project-wrike">
-          <span className="font-medium text-slate-700">Wrike #</span>
-          <input
-            id="edit-project-wrike"
-            value={wrikeNumber}
-            onChange={(event) => onWrikeNumber(event.target.value)}
-            className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm" htmlFor="edit-project-ih-date">
-          <span className="font-medium text-slate-700">IH date</span>
-          <input
-            id="edit-project-ih-date"
-            type="date"
-            value={ihDate}
-            onChange={(event) => onIhDate(event.target.value)}
-            className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900"
-          />
-        </label>
+        <ProjectFormFields
+          idPrefix="edit-project"
+          tab={tab}
+          onTab={setTab}
+          name={name}
+          description={description}
+          notes={notes}
+          wrikeNumber={wrikeNumber}
+          sku={sku}
+          coupaNumber={coupaNumber}
+          customerContact={customerContact}
+          priority={priority}
+          projectType={projectType}
+          brand={brand}
+          accountUnitId={accountUnitId}
+          billable={billable}
+          allottedHours={allottedHours}
+          ihDate={ihDate}
+          ihDateLabel="IH date"
+          createdAt={createdAt}
+          assets={assets}
+          onAssets={onAssets}
+          onName={onName}
+          onDescription={onDescription}
+          onNotes={onNotes}
+          onWrikeNumber={onWrikeNumber}
+          onSku={onSku}
+          onCoupaNumber={onCoupaNumber}
+          onCustomerContact={onCustomerContact}
+          onPriority={onPriority}
+          onType={onType}
+          onBrand={onBrand}
+          onAccountUnitId={onAccountUnitId}
+          onBillable={onBillable}
+          onAllottedHours={onAllottedHours}
+          onIhDate={onIhDate}
+        />
         {error ? <p className="text-sm text-red-700">{error}</p> : null}
         <div className="flex items-center justify-between gap-2">
           {closed ? (
@@ -657,6 +987,403 @@ function ClockConfirmDialog({
       </form>
     </dialog>
   );
+}
+
+type ProjectFormTab = "details" | "billing" | "notes" | "assets";
+
+const inputClass = "h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900";
+
+// Details holds the job. Billing holds how it gets paid. Both dialogs share this so the tabs stay in step.
+function ProjectFormFields({
+  idPrefix,
+  tab,
+  onTab,
+  name,
+  description,
+  notes,
+  wrikeNumber,
+  sku,
+  coupaNumber,
+  customerContact,
+  priority,
+  projectType,
+  brand,
+  accountUnitId,
+  billable,
+  allottedHours,
+  ihDate,
+  ihDateLabel,
+  createdAt,
+  assets,
+  onAssets,
+  onName,
+  onDescription,
+  onNotes,
+  onWrikeNumber,
+  onSku,
+  onCoupaNumber,
+  onCustomerContact,
+  onPriority,
+  onType,
+  onBrand,
+  onAccountUnitId,
+  onBillable,
+  onAllottedHours,
+  onIhDate,
+}: {
+  idPrefix: string;
+  tab: ProjectFormTab;
+  onTab: (tab: ProjectFormTab) => void;
+  name: string;
+  description: string;
+  notes: string;
+  wrikeNumber: string;
+  sku: string;
+  coupaNumber: string;
+  customerContact: string;
+  priority: ProjectPriority;
+  projectType: ProjectType;
+  brand: ProjectBrand;
+  accountUnitId: ProjectAccountUnit;
+  billable: boolean;
+  allottedHours: string;
+  ihDate: string;
+  ihDateLabel: string;
+  createdAt: string;
+  assets: ProjectAsset[];
+  onAssets: (assets: ProjectAsset[]) => void;
+  onName: (value: string) => void;
+  onDescription: (value: string) => void;
+  onNotes: (value: string) => void;
+  onWrikeNumber: (value: string) => void;
+  onSku: (value: string) => void;
+  onCoupaNumber: (value: string) => void;
+  onCustomerContact: (value: string) => void;
+  onPriority: (value: ProjectPriority) => void;
+  onType: (value: ProjectType) => void;
+  onBrand: (value: ProjectBrand) => void;
+  onAccountUnitId: (value: ProjectAccountUnit) => void;
+  onBillable: (value: boolean) => void;
+  onAllottedHours: (value: string) => void;
+  onIhDate: (value: string) => void;
+}) {
+  const panelClass = "col-start-1 row-start-1 flex flex-col gap-4";
+
+  return (
+    <>
+      <div role="tablist" aria-label="Project sections" className="flex gap-1 rounded-lg bg-slate-100 p-1">
+        {(
+          [
+            ["details", "Details"],
+            ["billing", "Billing"],
+            ["notes", "Notes"],
+            ["assets", "Assets"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => onTab(id)}
+            className={
+              tab === id
+                ? "h-9 flex-1 rounded-md bg-white text-sm font-medium text-[#0f2c4c] shadow-sm"
+                : "h-9 flex-1 rounded-md text-sm font-medium text-slate-600 hover:text-slate-900"
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {/* Panels share one grid cell so the dialog height matches the taller tab. */}
+      <div className="relative grid">
+        <div className={`${panelClass} ${tab === "details" ? "" : "invisible"}`} inert={tab !== "details"} aria-hidden={tab !== "details"}>
+          <p className="text-sm text-slate-600">
+            <span className="font-medium text-slate-700">Created</span>
+            <span className="mt-1 block tabular-nums">
+              {createdAt ? formatCreated(createdAt) : "Saved when the project is created"}
+            </span>
+          </p>
+          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-name`}>
+            <span className="font-medium text-slate-700">Project name</span>
+            <input id={`${idPrefix}-name`} value={name} onChange={(event) => onName(event.target.value)} className={inputClass} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-description`}>
+            <span className="font-medium text-slate-700">Description</span>
+            <textarea
+              id={`${idPrefix}-description`}
+              value={description}
+              onChange={(event) => onDescription(event.target.value)}
+              rows={3}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-sku`}>
+            <span className="font-medium text-slate-700">SKU</span>
+            <input id={`${idPrefix}-sku`} value={sku} onChange={(event) => onSku(event.target.value)} className={inputClass} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-contact`}>
+            <span className="font-medium text-slate-700">Customer Contact</span>
+            <input
+              id={`${idPrefix}-contact`}
+              value={customerContact}
+              onChange={(event) => onCustomerContact(event.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <PriorityField id={`${idPrefix}-priority`} value={priority} onChange={onPriority} />
+          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-ih-date`}>
+            <span className="font-medium text-slate-700">{ihDateLabel}</span>
+            <input
+              id={`${idPrefix}-ih-date`}
+              type="date"
+              value={ihDate}
+              onChange={(event) => onIhDate(event.target.value)}
+              className={inputClass}
+            />
+          </label>
+        </div>
+        <div
+          className={`${panelClass} ${tab === "billing" ? "" : "invisible"}`}
+          inert={tab !== "billing"}
+          aria-hidden={tab !== "billing"}
+        >
+          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-billable`}>
+            <span className="font-medium text-slate-700">Billable</span>
+            <select
+              id={`${idPrefix}-billable`}
+              value={billable ? "true" : "false"}
+              onChange={(event) => onBillable(event.target.value === "true")}
+              className={inputClass}
+            >
+              <option value="true">True</option>
+              <option value="false">False</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-wrike`}>
+            <span className="font-medium text-slate-700">Wrike #</span>
+            <input
+              id={`${idPrefix}-wrike`}
+              value={wrikeNumber}
+              onChange={(event) => onWrikeNumber(event.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-allotted`}>
+            <span className="font-medium text-slate-700">Allotted hours</span>
+            <input
+              id={`${idPrefix}-allotted`}
+              value={allottedHours}
+              inputMode="decimal"
+              onChange={(event) => onAllottedHours(event.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-coupa`}>
+            <span className="font-medium text-slate-700">Coupa #</span>
+            <input
+              id={`${idPrefix}-coupa`}
+              value={coupaNumber}
+              onChange={(event) => onCoupaNumber(event.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <ChoiceField id={`${idPrefix}-type`} label="Type" value={projectType} options={PROJECT_TYPES} onChange={onType} />
+          <ChoiceField id={`${idPrefix}-brand`} label="Brand" value={brand} options={PROJECT_BRANDS} onChange={onBrand} />
+          <ChoiceField
+            id={`${idPrefix}-account-unit`}
+            label="Accounting unit"
+            value={accountUnitId}
+            options={PROJECT_ACCOUNT_UNITS}
+            onChange={onAccountUnitId}
+          />
+        </div>
+        <div
+          className={`${panelClass} h-full ${tab === "notes" ? "" : "invisible"}`}
+          inert={tab !== "notes"}
+          aria-hidden={tab !== "notes"}
+        >
+          <label className="flex min-h-0 flex-1 flex-col gap-1 text-sm" htmlFor={`${idPrefix}-notes`}>
+            <span className="font-medium text-slate-700">Notes</span>
+            <textarea
+              id={`${idPrefix}-notes`}
+              value={notes}
+              onChange={(event) => onNotes(event.target.value)}
+              className="min-h-40 flex-1 resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
+            />
+          </label>
+        </div>
+        {/* Absolute so a long file list scrolls instead of stretching the dialog. */}
+        <div
+          className={`absolute inset-0 flex flex-col gap-3 overflow-y-auto bg-white ${tab === "assets" ? "" : "invisible"}`}
+          inert={tab !== "assets"}
+          aria-hidden={tab !== "assets"}
+        >
+          <ProjectAssetsPanel idPrefix={idPrefix} assets={assets} onChange={onAssets} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ProjectAssetsPanel({
+  idPrefix,
+  assets,
+  onChange,
+}: {
+  idPrefix: string;
+  assets: ProjectAsset[];
+  onChange: (assets: ProjectAsset[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function addFiles(list: FileList | null) {
+    const files = [...(list ?? [])];
+    if (files.length === 0) return;
+    const next = [...assets];
+    const skipped: string[] = [];
+    for (const file of files) {
+      if (file.size > MAX_PROJECT_ASSET_BYTES) {
+        skipped.push(file.name);
+        continue;
+      }
+      next.push(await readProjectAsset(file));
+    }
+    onChange(next);
+    setError(skipped.length > 0 ? `${skipped.join(", ")} is over 1.5 MB.` : null);
+    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-slate-600">Upload files for this project, then download them from this list.</p>
+        <button type="button" onClick={() => inputRef.current?.click()} className={navyButton}>
+          Upload
+        </button>
+        <input
+          ref={inputRef}
+          id={`${idPrefix}-assets`}
+          type="file"
+          multiple
+          className="sr-only"
+          onChange={(event) => void addFiles(event.target.files)}
+        />
+      </div>
+      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {assets.length === 0 ? (
+        <p className="text-sm text-slate-500">No files yet.</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {assets.map((asset) => (
+            <li key={asset.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-800">{asset.name}</p>
+                <p className="text-xs text-slate-500">{formatAssetSize(asset.sizeBytes)}</p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <button type="button" onClick={() => downloadProjectAsset(asset)} className={`${outlineButton} h-8 px-3`}>
+                  Download
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChange(assets.filter((item) => item.id !== asset.id))}
+                  className="h-8 rounded-lg px-3 text-sm font-medium text-red-700 hover:bg-red-50"
+                >
+                  Remove
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
+function formatCreated(iso: string): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" });
+}
+
+function ChoiceField<T extends string>({
+  id,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: T | "";
+  options: readonly T[];
+  onChange: (value: T | "") => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-sm" htmlFor={id}>
+      <span className="font-medium text-slate-700">{label}</span>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value as T | "")}
+        className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900"
+      >
+        <option value="">Select</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function priorityLabel(priority: ProjectPriority): string {
+  return priority === "rush" ? "Rush" : "Standard";
+}
+
+function PriorityField({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: ProjectPriority;
+  onChange: (value: ProjectPriority) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-sm" htmlFor={id}>
+      <span className="font-medium text-slate-700">Priority</span>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value === "rush" ? "rush" : "standard")}
+        className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900"
+      >
+        <option value="standard">Standard</option>
+        <option value="rush">Rush</option>
+      </select>
+    </label>
+  );
+}
+
+// Blank is no cap. Anything else must be a number that is zero or greater.
+function parseAllottedHours(raw: string): number | null | "invalid" {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const hours = Number(trimmed);
+  if (!Number.isFinite(hours) || hours < 0) return "invalid";
+  return Math.round(hours * 100) / 100;
+}
+
+function formatAllotted(hours: number | null): string {
+  if (hours == null) return "—";
+  return hours.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
 function PlayIcon() {

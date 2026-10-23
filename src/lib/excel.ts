@@ -1,5 +1,5 @@
 // Small .xlsx writer so reports do not need another package.
-// One sheet per file. Stored (uncompressed) zip entries, which Excel opens.
+// Stored (uncompressed) zip entries, which Excel opens. One call can write several sheets.
 
 export type ExcelKind = "text" | "money" | "number" | "count" | "percent";
 
@@ -25,7 +25,7 @@ const STYLE: Record<ExcelKind, number> = {
   count: 5,
 };
 
-export function downloadExcel(filename: string, sheet: ExcelSheet) {
+export function downloadExcel(filename: string, sheet: ExcelSheet | ExcelSheet[]) {
   const bytes = buildXlsx(sheet);
   const file = new Blob([bytes], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -38,14 +38,18 @@ export function downloadExcel(filename: string, sheet: ExcelSheet) {
   URL.revokeObjectURL(url);
 }
 
-export function buildXlsx(sheet: ExcelSheet): Uint8Array {
+export function buildXlsx(sheet: ExcelSheet | ExcelSheet[]): Uint8Array {
+  const sheets = Array.isArray(sheet) ? sheet : [sheet];
   const files = [
-    { name: "[Content_Types].xml", data: xml(contentTypes()) },
+    { name: "[Content_Types].xml", data: xml(contentTypes(sheets.length)) },
     { name: "_rels/.rels", data: xml(packageRels()) },
-    { name: "xl/workbook.xml", data: xml(workbook(sheet.name)) },
-    { name: "xl/_rels/workbook.xml.rels", data: xml(workbookRels()) },
+    { name: "xl/workbook.xml", data: xml(workbook(sheets.map((item) => item.name))) },
+    { name: "xl/_rels/workbook.xml.rels", data: xml(workbookRels(sheets.length)) },
     { name: "xl/styles.xml", data: xml(styles()) },
-    { name: "xl/worksheets/sheet1.xml", data: xml(worksheet(sheet)) },
+    ...sheets.map((item, index) => ({
+      name: `xl/worksheets/sheet${index + 1}.xml`,
+      data: xml(worksheet(item)),
+    })),
   ];
   return zipStore(files);
 }
@@ -98,11 +102,17 @@ function columnName(index: number): string {
   return name;
 }
 
-function workbook(sheetName: string): string {
+function workbook(names: string[]): string {
+  const sheets = names
+    .map(
+      (name, index) =>
+        `<sheet name="${escapeXml(safeSheetName(name))}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`,
+    )
+    .join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheets>
-    <sheet name="${escapeXml(safeSheetName(sheetName))}" sheetId="1" r:id="rId1"/>
+    ${sheets}
   </sheets>
 </workbook>`;
 }
@@ -146,13 +156,17 @@ function styles(): string {
 </styleSheet>`;
 }
 
-function contentTypes(): string {
+function contentTypes(sheetCount: number): string {
+  const sheets = Array.from({ length: sheetCount }, (_, index) => {
+    const part = `/xl/worksheets/sheet${index + 1}.xml`;
+    return `<Override PartName="${part}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`;
+  }).join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  ${sheets}
   <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 </Types>`;
 }
@@ -164,11 +178,16 @@ function packageRels(): string {
 </Relationships>`;
 }
 
-function workbookRels(): string {
+function workbookRels(sheetCount: number): string {
+  const sheets = Array.from({ length: sheetCount }, (_, index) => {
+    const id = index + 1;
+    return `<Relationship Id="rId${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${id}.xml"/>`;
+  }).join("");
+  const stylesId = sheetCount + 1;
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  ${sheets}
+  <Relationship Id="rId${stylesId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`;
 }
 

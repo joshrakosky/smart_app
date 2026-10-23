@@ -22,6 +22,8 @@ export function ReportsDialog({ onClose }: { onClose: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [busy, setBusy] = useState<ReportId | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -37,7 +39,7 @@ export function ReportsDialog({ onClose }: { onClose: () => void }) {
       if (id === "prices") {
         downloadExcel(reportFilename(id), priceReport(getPricesSnapshot()));
       } else if (id === "time") {
-        downloadExcel(reportFilename(id), timeReport(getProjectsSnapshot(), Date.now()));
+        downloadExcel(reportFilename(id), timeReport(getProjectsSnapshot(), Date.now(), { from, to }));
       } else {
         downloadExcel(reportFilename(id), orderReport(await loadOrders()));
       }
@@ -74,20 +76,46 @@ export function ReportsDialog({ onClose }: { onClose: () => void }) {
         {REPORTS.map((report) => (
           <li
             key={report.id}
-            className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-3 py-3"
+            className="flex flex-col gap-3 rounded-lg border border-slate-200 px-3 py-3"
           >
-            <div>
-              <p className="text-sm font-medium">{report.label}</p>
-              <p className="text-sm text-slate-500">{report.detail}</p>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium">{report.label}</p>
+                <p className="text-sm text-slate-500">{report.detail}</p>
+              </div>
+              <button
+                type="button"
+                className={navyButton}
+                disabled={busy != null}
+                onClick={() => exportReport(report.id)}
+              >
+                {busy === report.id ? "Exporting…" : "Export"}
+              </button>
             </div>
-            <button
-              type="button"
-              className={navyButton}
-              disabled={busy != null}
-              onClick={() => exportReport(report.id)}
-            >
-              {busy === report.id ? "Exporting…" : "Export"}
-            </button>
+            {report.id === "time" ? (
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1 text-sm" htmlFor="hours-from">
+                  <span className="font-medium text-slate-700">From</span>
+                  <input
+                    id="hours-from"
+                    type="date"
+                    value={from}
+                    onChange={(event) => setFrom(event.target.value)}
+                    className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm" htmlFor="hours-to">
+                  <span className="font-medium text-slate-700">To</span>
+                  <input
+                    id="hours-to"
+                    type="date"
+                    value={to}
+                    onChange={(event) => setTo(event.target.value)}
+                    className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-slate-900"
+                  />
+                </label>
+              </div>
+            ) : null}
           </li>
         ))}
       </ul>

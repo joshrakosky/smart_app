@@ -2,7 +2,7 @@ import type { ExcelColumn, ExcelSheet } from "@/lib/excel";
 import { fromCents, toCents } from "@/lib/money";
 import { baseBreak, gpmDollars, gpmPercent, PRICE_TYPE_LABELS, type Price } from "@/lib/prices";
 import { stakeholderName } from "@/lib/stakeholders";
-import { hoursDecimal, timeLines, type Project } from "@/lib/time-clock";
+import { reportMinutes, timeLines, type Project } from "@/lib/time-clock";
 import type { OrderLineSummary } from "@/lib/types";
 
 // First-pass columns. They follow the columns already on each screen.
@@ -27,7 +27,7 @@ export const REPORTS: { id: ReportId; label: string; detail: string }[] = [
   {
     id: "time",
     label: "Hours",
-    detail: "Person, date, project, and decimal hours — one line per person per day per project.",
+    detail: "Person, date, project, Wrike #, customer contact, SKU, and minutes on two sheets: Billable and Unbillable. Pick dates below, or leave them blank for every day.",
   },
 ];
 
@@ -61,7 +61,10 @@ const timeColumns: ExcelColumn[] = [
   { header: "Person", kind: "text" },
   { header: "Date", kind: "text" },
   { header: "Project", kind: "text" },
-  { header: "Hours", kind: "number" },
+  { header: "Wrike #", kind: "text" },
+  { header: "Customer Contact", kind: "text" },
+  { header: "SKU", kind: "text" },
+  { header: "Minutes", kind: "number" },
 ];
 
 export function priceReport(prices: Price[]): ExcelSheet {
@@ -106,17 +109,24 @@ export function orderReport(lines: OrderLineSummary[]): ExcelSheet {
   };
 }
 
-export function timeReport(projects: Project[], now: number): ExcelSheet {
-  return {
-    name: "Hours",
-    columns: timeColumns,
-    rows: timeLines(projects, now).map((line) => [
-      line.person,
-      line.date,
-      line.project,
-      hoursDecimal(line.ms),
-    ]),
-  };
+export function timeReport(
+  projects: Project[],
+  now: number,
+  range: { from: string; to: string } = { from: "", to: "" },
+): ExcelSheet[] {
+  // Inclusive local dates, YYYY-MM-DD. A blank end means that side is open.
+  let from = range.from;
+  let to = range.to;
+  if (from && to && from > to) [from, to] = [to, from];
+  const lines = timeLines(projects, now).filter((line) => (!from || line.date >= from) && (!to || line.date <= to));
+  const rowsFor = (billable: boolean) =>
+    lines
+      .filter((line) => line.billable === billable)
+      .map((line) => [line.person, line.date, line.project, line.wrikeNumber, line.customerContact, line.sku, reportMinutes(line.ms)]);
+  return [
+    { name: "Billable", columns: timeColumns, rows: rowsFor(true) },
+    { name: "Unbillable", columns: timeColumns, rows: rowsFor(false) },
+  ];
 }
 
 export function reportFilename(id: ReportId, now = new Date()): string {
