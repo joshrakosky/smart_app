@@ -27,7 +27,10 @@ const STYLE: Record<ExcelKind, number> = {
 
 export function downloadExcel(filename: string, sheet: ExcelSheet | ExcelSheet[]) {
   const bytes = buildXlsx(sheet);
-  const file = new Blob([bytes], {
+  // Blob only accepts an ArrayBuffer. Uint8Array's buffer type is wider than that.
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  const file = new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
   const url = URL.createObjectURL(file);

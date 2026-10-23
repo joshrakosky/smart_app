@@ -549,11 +549,13 @@ export function closeProject(projects: Project[], projectId: string, close: Excl
 function normalizeProject(value: unknown): Project | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Partial<Project>;
-  if (typeof row.id !== "string" || typeof row.name !== "string" || typeof row.ihDate !== "string") return null;
+  // Copy ihDate out so the session mapper keeps the string, not string | undefined.
+  const ihDate = row.ihDate;
+  if (typeof row.id !== "string" || typeof row.name !== "string" || typeof ihDate !== "string") return null;
   const close = row.close === "complete" || row.close === "cancelled" ? row.close : null;
   const sessions = Array.isArray(row.sessions)
     ? row.sessions
-        .map((session) => normalizeSession(session, row.ihDate))
+        .map((session) => normalizeSession(session, ihDate))
         .filter((session): session is WorkSession => session != null)
     : [];
   return {
@@ -571,8 +573,8 @@ function normalizeProject(value: unknown): Project | null {
     accountUnitId: listedValue(row.accountUnitId, PROJECT_ACCOUNT_UNITS),
     billable: row.billable === true,
     allottedHours: allottedHoursFrom(row.allottedHours),
-    ihDate: row.ihDate,
-    createdAt: createdAtFrom(row.createdAt, row.ihDate),
+    ihDate,
+    createdAt: createdAtFrom(row.createdAt, ihDate),
     close,
     sessions,
   };
