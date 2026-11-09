@@ -8,7 +8,23 @@ export const CURRENT_USER = "Contractor 1";
 export type SessionStatus = "running" | "paused";
 export type ProjectClose = "complete" | "cancelled" | null;
 export type ProjectPriority = "rush" | "standard";
-export type ProjectLabel = "In Progress" | "On Hold" | "Complete" | "Cancelled";
+// Workflow status lives on Details. Complete / Cancelled come from close and land in Archive.
+export const PROJECT_WORKFLOW_STATUSES = [
+  "in-progress",
+  "approved",
+  "in-review",
+  "onboard-ready",
+  "dealer-logo",
+] as const;
+export type ProjectWorkflowStatus = (typeof PROJECT_WORKFLOW_STATUSES)[number];
+export const PROJECT_WORKFLOW_STATUS_LABELS: Record<ProjectWorkflowStatus, string> = {
+  "in-progress": "In Progress",
+  approved: "Approved",
+  "in-review": "In Review",
+  "onboard-ready": "Onboard Ready",
+  "dealer-logo": "Dealer Logo",
+};
+export type ProjectLabel = (typeof PROJECT_WORKFLOW_STATUS_LABELS)[ProjectWorkflowStatus] | "Complete" | "Cancelled";
 // Type and Brand are chosen when a project is created. Empty means not set yet.
 export const PROJECT_TYPES = ["Creative", "Admin"] as const;
 export type ProjectType = (typeof PROJECT_TYPES)[number] | "";
@@ -22,7 +38,7 @@ export const PROJECT_BRANDS = [
   "Trane Supply",
   "Thermoking",
 ] as const;
-export type ProjectBrand = (typeof PROJECT_BRANDS)[number] | "";
+export type ProjectBrand = (typeof PROJECT_BRANDS)[number];
 // Billing account units. The value stored on the project is the label itself.
 export const PROJECT_ACCOUNT_UNITS = [
   "Creative-CQ55002872-Conference",
@@ -62,12 +78,20 @@ export type WorkSession = {
   days: DayHours[];
 };
 
+// One note in the project feed. Oldest first; everyone on the team can add.
+export type ProjectNote = {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+};
+
 export type Project = {
   id: string;
   name: string;
   description: string;
-  // Free-form notes kept with the project. Blank until someone writes them.
-  notes: string;
+  // Timestamped feed. Older single-string notes migrate into one entry on load.
+  notes: ProjectNote[];
   wrikeNumber: string;
   // Optional product SKU. Blank is allowed.
   sku: string;
@@ -79,13 +103,18 @@ export type Project = {
   priority: ProjectPriority;
   // Creative or Admin. Blank on projects created before the dropdown existed.
   type: ProjectType;
-  brand: ProjectBrand;
+  // One or more brands. Empty until someone checks a box.
+  brands: ProjectBrand[];
   // One of PROJECT_ACCOUNT_UNITS. Blank until someone picks a unit.
   accountUnitId: ProjectAccountUnit;
   // Time on this project can be billed. Older projects stay unchecked.
   billable: boolean;
+  // Overtime is allowed on this job. Older projects stay false.
+  otAvailable: boolean;
   // Max hours allowed on the project. Null until someone sets a cap.
   allottedHours: number | null;
+  // Manual workflow status on Details. Archive still uses close.
+  workflowStatus: ProjectWorkflowStatus;
   ihDate: string;
   // ISO time the project was created. Empty on rows saved before this field existed.
   createdAt: string;
@@ -113,17 +142,19 @@ export const SEED_PROJECTS: Project[] = [
     id: "seed-brochure",
     name: "Brochure reprint",
     description: "",
-    notes: "",
+    notes: [],
     wrikeNumber: "",
     sku: "",
     coupaNumber: "",
     customerContact: "",
     priority: "standard",
     type: "",
-    brand: "",
+    brands: [],
     accountUnitId: "",
     billable: false,
+    otAvailable: false,
     allottedHours: null,
+    workflowStatus: "in-progress",
     ihDate: "2026-09-18",
     createdAt: "2026-09-18T13:00:00.000Z",
     close: null,
@@ -147,17 +178,19 @@ export const SEED_PROJECTS: Project[] = [
     id: "seed-posters",
     name: "Dealer posters",
     description: "",
-    notes: "",
+    notes: [],
     wrikeNumber: "",
     sku: "",
     coupaNumber: "",
     customerContact: "",
     priority: "standard",
     type: "",
-    brand: "",
+    brands: [],
     accountUnitId: "",
     billable: false,
+    otAvailable: false,
     allottedHours: null,
+    workflowStatus: "in-progress",
     ihDate: "2026-09-22",
     createdAt: "2026-09-22T13:00:00.000Z",
     close: null,
@@ -186,17 +219,19 @@ export const SEED_PROJECTS: Project[] = [
     id: "seed-banners",
     name: "Banner stands",
     description: "",
-    notes: "",
+    notes: [],
     wrikeNumber: "",
     sku: "",
     coupaNumber: "",
     customerContact: "",
     priority: "standard",
     type: "",
-    brand: "",
+    brands: [],
     accountUnitId: "",
     billable: false,
+    otAvailable: false,
     allottedHours: null,
+    workflowStatus: "in-progress",
     ihDate: "2026-09-26",
     createdAt: "2026-09-26T13:00:00.000Z",
     close: null,
@@ -261,8 +296,7 @@ export function loadProjects(): Project[] {
 export function projectStatus(project: Project): ProjectLabel {
   if (project.close === "complete") return "Complete";
   if (project.close === "cancelled") return "Cancelled";
-  if (project.sessions.some((session) => session.status === "running")) return "In Progress";
-  return "On Hold";
+  return PROJECT_WORKFLOW_STATUS_LABELS[project.workflowStatus];
 }
 
 export function sessionMs(session: WorkSession, now: number): number {
@@ -480,21 +514,140 @@ export function updateProject(
   patch: {
     name: string;
     description: string;
-    notes: string;
+    notes: ProjectNote[];
     wrikeNumber: string;
     sku: string;
     coupaNumber: string;
     customerContact: string;
     priority: ProjectPriority;
     type: ProjectType;
-    brand: ProjectBrand;
+    brands: ProjectBrand[];
     accountUnitId: ProjectAccountUnit;
     billable: boolean;
+    otAvailable: boolean;
     allottedHours: number | null;
+    workflowStatus: ProjectWorkflowStatus;
     ihDate: string;
   },
 ): Project[] {
   return projects.map((project) => (project.id === projectId ? { ...project, ...patch } : project));
+}
+
+// Pull a completed or cancelled job back into the active queue.
+export function reviveProject(projects: Project[], projectId: string): Project[] {
+  return projects.map((project) =>
+    project.id === projectId ? { ...project, close: null, workflowStatus: "in-progress" as const } : project,
+  );
+}
+
+// Append a note from the signed-in person. Body is trimmed; blanks are ignored.
+export function addProjectNote(
+  projects: Project[],
+  projectId: string,
+  body: string,
+  author = CURRENT_USER,
+  at = new Date().toISOString(),
+): Project[] {
+  const text = body.trim();
+  if (!text) return projects;
+  const note: ProjectNote = { id: crypto.randomUUID(), author, body: text, createdAt: at };
+  return projects.map((project) =>
+    project.id === projectId ? { ...project, notes: [...project.notes, note] } : project,
+  );
+}
+
+// Fields someone can opt into when copying a project into a fresh row.
+export type ProjectCopyField =
+  | "name"
+  | "description"
+  | "sku"
+  | "customerContact"
+  | "priority"
+  | "ihDate"
+  | "wrikeNumber"
+  | "coupaNumber"
+  | "type"
+  | "brands"
+  | "accountUnitId"
+  | "billable"
+  | "otAvailable"
+  | "allottedHours"
+  | "workflowStatus"
+  | "notes"
+  | "assets";
+
+export const PROJECT_COPY_FIELDS: { id: ProjectCopyField; label: string }[] = [
+  { id: "name", label: "Project name" },
+  { id: "description", label: "Description" },
+  { id: "sku", label: "SKU" },
+  { id: "customerContact", label: "Customer Contact" },
+  { id: "priority", label: "Priority" },
+  { id: "ihDate", label: "IH date" },
+  { id: "wrikeNumber", label: "Wrike #" },
+  { id: "coupaNumber", label: "Coupa #" },
+  { id: "type", label: "Type" },
+  { id: "brands", label: "Brand" },
+  { id: "accountUnitId", label: "Accounting unit" },
+  { id: "billable", label: "Billable" },
+  { id: "otAvailable", label: "OT available" },
+  { id: "allottedHours", label: "Allotted hours" },
+  { id: "workflowStatus", label: "Status" },
+  { id: "notes", label: "Notes" },
+  { id: "assets", label: "Assets" },
+];
+
+export function blankProject(id: string, now = new Date()): Project {
+  return {
+    id,
+    name: "",
+    description: "",
+    notes: [],
+    wrikeNumber: "",
+    sku: "",
+    coupaNumber: "",
+    customerContact: "",
+    priority: "standard",
+    type: "",
+    brands: [],
+    accountUnitId: "",
+    billable: false,
+    otAvailable: false,
+    allottedHours: null,
+    workflowStatus: "in-progress",
+    ihDate: "",
+    createdAt: now.toISOString(),
+    close: null,
+    sessions: [],
+  };
+}
+
+// Build a new open project from selected fields. Hours and sessions never copy.
+export function buildCopiedProject(
+  source: Project,
+  selected: ReadonlySet<ProjectCopyField>,
+  id: string,
+  now = new Date(),
+): Project {
+  const next = blankProject(id, now);
+  if (selected.has("name")) next.name = source.name ? `Copy of ${source.name}` : "";
+  if (selected.has("description")) next.description = source.description;
+  if (selected.has("sku")) next.sku = source.sku;
+  if (selected.has("customerContact")) next.customerContact = source.customerContact;
+  if (selected.has("priority")) next.priority = source.priority;
+  if (selected.has("ihDate")) next.ihDate = source.ihDate;
+  if (selected.has("wrikeNumber")) next.wrikeNumber = source.wrikeNumber;
+  if (selected.has("coupaNumber")) next.coupaNumber = source.coupaNumber;
+  if (selected.has("type")) next.type = source.type;
+  if (selected.has("brands")) next.brands = [...source.brands];
+  if (selected.has("accountUnitId")) next.accountUnitId = source.accountUnitId;
+  if (selected.has("billable")) next.billable = source.billable;
+  if (selected.has("otAvailable")) next.otAvailable = source.otAvailable;
+  if (selected.has("allottedHours")) next.allottedHours = source.allottedHours;
+  if (selected.has("workflowStatus")) next.workflowStatus = source.workflowStatus;
+  if (selected.has("notes")) {
+    next.notes = source.notes.map((note) => ({ ...note, id: crypto.randomUUID() }));
+  }
+  return next;
 }
 
 // Starting here pauses this person's other projects and starts their pause clocks.
@@ -575,17 +728,19 @@ function normalizeProject(value: unknown): Project | null {
     id: row.id,
     name: row.name,
     description: typeof row.description === "string" ? row.description : "",
-    notes: typeof row.notes === "string" ? row.notes : "",
+    notes: notesFrom(row.notes),
     wrikeNumber: typeof row.wrikeNumber === "string" ? row.wrikeNumber : "",
     sku: typeof row.sku === "string" ? row.sku : "",
     coupaNumber: typeof row.coupaNumber === "string" ? row.coupaNumber : "",
     customerContact: typeof row.customerContact === "string" ? row.customerContact : "",
     priority: row.priority === "rush" ? "rush" : "standard",
     type: listedValue(row.type, PROJECT_TYPES),
-    brand: listedValue(row.brand, PROJECT_BRANDS),
+    brands: brandsFrom(row),
     accountUnitId: listedValue(row.accountUnitId, PROJECT_ACCOUNT_UNITS),
     billable: row.billable === true,
+    otAvailable: row.otAvailable === true,
     allottedHours: allottedHoursFrom(row.allottedHours),
+    workflowStatus: workflowStatusFrom(row.workflowStatus),
     ihDate,
     createdAt: createdAtFrom(row.createdAt, ihDate),
     close,
@@ -595,6 +750,57 @@ function normalizeProject(value: unknown): Project | null {
 
 function listedValue<T extends string>(value: unknown, allowed: readonly T[]): T | "" {
   return typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : "";
+}
+
+function workflowStatusFrom(value: unknown): ProjectWorkflowStatus {
+  return typeof value === "string" && (PROJECT_WORKFLOW_STATUSES as readonly string[]).includes(value)
+    ? (value as ProjectWorkflowStatus)
+    : "in-progress";
+}
+
+// New shape is an array. Older localStorage rows used a single brand string.
+function brandsFrom(row: Partial<Project> & { brand?: unknown }): ProjectBrand[] {
+  if (Array.isArray(row.brands)) {
+    return row.brands.filter(
+      (brand): brand is ProjectBrand =>
+        typeof brand === "string" && (PROJECT_BRANDS as readonly string[]).includes(brand),
+    );
+  }
+  const legacy = listedValue(row.brand, PROJECT_BRANDS);
+  return legacy ? [legacy] : [];
+}
+
+// New shape is a feed. Older rows stored one free-form string.
+function notesFrom(value: unknown): ProjectNote[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") return null;
+        const row = entry as Partial<ProjectNote>;
+        if (typeof row.id !== "string" || typeof row.body !== "string" || !row.body.trim()) return null;
+        return {
+          id: row.id,
+          author: typeof row.author === "string" && row.author.trim() ? row.author : CURRENT_USER,
+          body: row.body,
+          createdAt:
+            typeof row.createdAt === "string" && !Number.isNaN(Date.parse(row.createdAt))
+              ? row.createdAt
+              : new Date().toISOString(),
+        } satisfies ProjectNote;
+      })
+      .filter((note): note is ProjectNote => note != null);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return [
+      {
+        id: "legacy-note",
+        author: CURRENT_USER,
+        body: value,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+  return [];
 }
 
 function allottedHoursFrom(value: unknown): number | null {

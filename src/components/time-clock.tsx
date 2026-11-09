@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { CopyProjectDialog } from "@/components/copy-project-dialog";
+import { DescriptionField } from "@/components/description-field";
+import { ProjectNotesFeed } from "@/components/project-notes-feed";
 import { formatSlashDate } from "@/lib/money";
 import {
   downloadProjectAsset,
@@ -12,6 +15,8 @@ import {
   type ProjectAsset,
 } from "@/lib/project-assets";
 import {
+  blankProject,
+  buildCopiedProject,
   closeProject,
   CURRENT_USER,
   eachDate,
@@ -21,6 +26,8 @@ import {
   type HoursSpan,
   getProjectsSnapshot,
   pauseProject,
+  PROJECT_WORKFLOW_STATUS_LABELS,
+  PROJECT_WORKFLOW_STATUSES,
   projectStatus,
   replaceProjects,
   sessionLabel,
@@ -38,8 +45,11 @@ import {
   type Project,
   type ProjectAccountUnit,
   type ProjectBrand,
+  type ProjectCopyField,
+  type ProjectNote,
   type ProjectPriority,
   type ProjectType,
+  type ProjectWorkflowStatus,
   type WorkSession,
 } from "@/lib/time-clock";
 
@@ -72,10 +82,9 @@ export function TimeClock() {
   const hoursRef = useRef<HTMLDialogElement>(null);
   const [now, setNow] = useState(0);
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState<ProjectNote[]>([]);
   const [assets, setAssets] = useState<ProjectAsset[]>([]);
   const [wrikeNumber, setWrikeNumber] = useState("");
   const [sku, setSku] = useState("");
@@ -83,17 +92,19 @@ export function TimeClock() {
   const [customerContact, setCustomerContact] = useState("");
   const [priority, setPriority] = useState<ProjectPriority>("standard");
   const [projectType, setProjectType] = useState<ProjectType>("");
-  const [brand, setBrand] = useState<ProjectBrand>("");
+  const [brands, setBrands] = useState<ProjectBrand[]>([]);
   const [accountUnitId, setAccountUnitId] = useState<ProjectAccountUnit>("");
   const [billable, setBillable] = useState(false);
+  const [otAvailable, setOtAvailable] = useState(false);
   const [allottedHours, setAllottedHours] = useState("");
+  const [workflowStatus, setWorkflowStatus] = useState<ProjectWorkflowStatus>("in-progress");
   const [ihDate, setIhDate] = useState("");
   const [createTab, setCreateTab] = useState<ProjectFormTab>("details");
   const [formError, setFormError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Project | null>(null);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [editNotes, setEditNotes] = useState("");
+  const [editNotes, setEditNotes] = useState<ProjectNote[]>([]);
   const [editAssets, setEditAssets] = useState<ProjectAsset[]>([]);
   const [editWrikeNumber, setEditWrikeNumber] = useState("");
   const [editSku, setEditSku] = useState("");
@@ -101,12 +112,15 @@ export function TimeClock() {
   const [editCustomerContact, setEditCustomerContact] = useState("");
   const [editPriority, setEditPriority] = useState<ProjectPriority>("standard");
   const [editType, setEditType] = useState<ProjectType>("");
-  const [editBrand, setEditBrand] = useState<ProjectBrand>("");
+  const [editBrands, setEditBrands] = useState<ProjectBrand[]>([]);
   const [editAccountUnitId, setEditAccountUnitId] = useState<ProjectAccountUnit>("");
   const [editBillable, setEditBillable] = useState(false);
+  const [editOtAvailable, setEditOtAvailable] = useState(false);
   const [editAllottedHours, setEditAllottedHours] = useState("");
+  const [editWorkflowStatus, setEditWorkflowStatus] = useState<ProjectWorkflowStatus>("in-progress");
   const [editIhDate, setEditIhDate] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
+  const [copying, setCopying] = useState(false);
   const [confirm, setConfirm] = useState<ClockConfirm | null>(null);
   // Idle weeks still need a timestamp. `now` stays 0 until a clock is moving.
   const [mountedAt, setMountedAt] = useState(0);
@@ -145,20 +159,22 @@ export function TimeClock() {
     replaceProjects(pauseProject(projects, running.id, stamp));
   }, [weekLeft, mineRunning, projects]);
 
+  // Archive holds completed / cancelled rows. The Hours queue only shows open work.
   const current = projects.filter((project) => project.close == null);
-  const selected = selectedId ? projects.filter((project) => project.id === selectedId) : projects;
   const needle = query.trim().toLowerCase();
   const visible = needle
-    ? selected.filter((project) => {
-        const haystack = `${project.name} ${project.description} ${project.notes} ${project.wrikeNumber} ${project.sku} ${project.coupaNumber} ${project.customerContact} ${priorityLabel(project.priority)}`.toLowerCase();
+    ? current.filter((project) => {
+        const noteText = project.notes.map((note) => note.body).join(" ");
+        const brandText = project.brands.join(" ");
+        const haystack = `${project.name} ${project.description} ${noteText} ${brandText} ${project.wrikeNumber} ${project.sku} ${project.coupaNumber} ${project.customerContact} ${priorityLabel(project.priority)} ${projectStatus(project)}`.toLowerCase();
         return haystack.includes(needle);
       })
-    : selected;
+    : current;
 
   function openCreate() {
     setName("");
     setDescription("");
-    setNotes("");
+    setNotes([]);
     setAssets([]);
     setWrikeNumber("");
     setSku("");
@@ -166,10 +182,12 @@ export function TimeClock() {
     setCustomerContact("");
     setPriority("standard");
     setProjectType("");
-    setBrand("");
+    setBrands([]);
     setAccountUnitId("");
     setBillable(false);
+    setOtAvailable(false);
     setAllottedHours("");
+    setWorkflowStatus("in-progress");
     setIhDate("");
     setCreateTab("details");
     setFormError(null);
@@ -204,24 +222,23 @@ export function TimeClock() {
     replaceProjects([
       ...projects,
       {
-        id,
+        ...blankProject(id),
         name: nextName,
         description: description.trim(),
-        notes: notes.trim(),
+        notes,
         wrikeNumber: wrikeNumber.trim(),
         sku: sku.trim(),
         coupaNumber: coupaNumber.trim(),
         customerContact: customerContact.trim(),
         priority,
         type: projectType,
-        brand,
+        brands,
         accountUnitId,
         billable,
+        otAvailable,
         allottedHours: allotted,
+        workflowStatus,
         ihDate,
-        createdAt: new Date().toISOString(),
-        close: null,
-        sessions: [],
       },
     ]);
     dialogRef.current?.close();
@@ -229,6 +246,7 @@ export function TimeClock() {
 
   function openEdit(project: Project) {
     setEditing(project);
+    setCopying(false);
     setEditName(project.name);
     setEditDescription(project.description);
     setEditNotes(project.notes);
@@ -239,10 +257,12 @@ export function TimeClock() {
     setEditCustomerContact(project.customerContact);
     setEditPriority(project.priority);
     setEditType(project.type);
-    setEditBrand(project.brand);
+    setEditBrands(project.brands);
     setEditAccountUnitId(project.accountUnitId);
     setEditBillable(project.billable);
+    setEditOtAvailable(project.otAvailable);
     setEditAllottedHours(project.allottedHours == null ? "" : String(project.allottedHours));
+    setEditWorkflowStatus(project.workflowStatus);
     setEditIhDate(project.ihDate);
     setEditError(null);
   }
@@ -272,20 +292,43 @@ export function TimeClock() {
       updateProject(projects, editing.id, {
         name: nextName,
         description: editDescription.trim(),
-        notes: editNotes.trim(),
+        notes: editNotes,
         wrikeNumber: editWrikeNumber.trim(),
         sku: editSku.trim(),
         coupaNumber: editCoupaNumber.trim(),
         customerContact: editCustomerContact.trim(),
         priority: editPriority,
         type: editType,
-        brand: editBrand,
+        brands: editBrands,
         accountUnitId: editAccountUnitId,
         billable: editBillable,
+        otAvailable: editOtAvailable,
         allottedHours: allotted,
+        workflowStatus: editWorkflowStatus,
         ihDate: editIhDate,
       }),
     );
+    setEditing(null);
+  }
+
+  function copyProject(selected: ProjectCopyField[]) {
+    if (!editing) return;
+    const id = crypto.randomUUID();
+    const picked = new Set(selected);
+    const next = buildCopiedProject(editing, picked, id);
+    // Name is required to show in the queue. Fall back if they skipped that checkbox.
+    if (!next.name.trim()) next.name = `Copy of ${editing.name}`;
+    if (!next.ihDate) next.ihDate = editing.ihDate;
+    if (picked.has("assets")) {
+      const assetError = saveProjectAssets(id, loadProjectAssets(editing.id));
+      if (assetError) {
+        setEditError(assetError);
+        setCopying(false);
+        return;
+      }
+    }
+    replaceProjects([...projects, next]);
+    setCopying(false);
     setEditing(null);
   }
 
@@ -306,7 +349,6 @@ export function TimeClock() {
     const at = Date.now();
     setNow(at);
     replaceProjects(closeProject(projects, project.id, close, at));
-    if (selectedId === project.id) setSelectedId("");
     setEditing(null);
     setConfirm(null);
   }
@@ -333,22 +375,6 @@ export function TimeClock() {
               aria-label="Search projects"
               className={`${fieldClass} w-full sm:w-64`}
             />
-          </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor="current-projects">
-            <span className="font-medium text-slate-700">Current Projects</span>
-            <select
-              id="current-projects"
-              value={selectedId}
-              onChange={(event) => setSelectedId(event.target.value)}
-              className={fieldClass}
-            >
-              <option value="">All</option>
-              {current.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
           </label>
           <WeekClock remaining={weekLeft} running={mineRunning} />
         </div>
@@ -471,7 +497,7 @@ export function TimeClock() {
 
       <dialog
         ref={dialogRef}
-        className="m-auto max-h-[calc(100%-2rem)] w-[min(28rem,calc(100%-2rem))] overflow-y-auto rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-lg backdrop:bg-slate-900/40"
+        className="m-auto max-h-[calc(100%-2rem)] w-[min(40rem,calc(100%-2rem))] overflow-y-auto rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-lg backdrop:bg-slate-900/40"
         aria-labelledby="new-project-title"
       >
         <form
@@ -507,10 +533,12 @@ export function TimeClock() {
             customerContact={customerContact}
             priority={priority}
             projectType={projectType}
-            brand={brand}
+            brands={brands}
             accountUnitId={accountUnitId}
             billable={billable}
+            otAvailable={otAvailable}
             allottedHours={allottedHours}
+            workflowStatus={workflowStatus}
             ihDate={ihDate}
             ihDateLabel="IH Dates"
             createdAt=""
@@ -525,10 +553,12 @@ export function TimeClock() {
             onCustomerContact={setCustomerContact}
             onPriority={setPriority}
             onType={setProjectType}
-            onBrand={setBrand}
+            onBrands={setBrands}
             onAccountUnitId={setAccountUnitId}
             onBillable={setBillable}
+            onOtAvailable={setOtAvailable}
             onAllottedHours={setAllottedHours}
+            onWorkflowStatus={setWorkflowStatus}
             onIhDate={setIhDate}
           />
           {formError ? <p className="text-sm text-red-700">{formError}</p> : null}
@@ -552,10 +582,12 @@ export function TimeClock() {
           customerContact={editCustomerContact}
           priority={editPriority}
           projectType={editType}
-          brand={editBrand}
+          brands={editBrands}
           accountUnitId={editAccountUnitId}
           billable={editBillable}
+          otAvailable={editOtAvailable}
           allottedHours={editAllottedHours}
+          workflowStatus={editWorkflowStatus}
           ihDate={editIhDate}
           createdAt={editing.createdAt}
           assets={editAssets}
@@ -564,22 +596,41 @@ export function TimeClock() {
           closed={editing.close != null}
           onName={setEditName}
           onDescription={setEditDescription}
-          onNotes={setEditNotes}
+          onNotes={(next) => {
+            // Notes are append-only like GPC: writing one sticks even if Edit is closed without Save.
+            setEditNotes(next);
+            if (editing) {
+              replaceProjects(
+                projects.map((project) => (project.id === editing.id ? { ...project, notes: next } : project)),
+              );
+            }
+          }}
           onWrikeNumber={setEditWrikeNumber}
           onSku={setEditSku}
           onCoupaNumber={setEditCoupaNumber}
           onCustomerContact={setEditCustomerContact}
           onPriority={setEditPriority}
           onType={setEditType}
-          onBrand={setEditBrand}
+          onBrands={setEditBrands}
           onAccountUnitId={setEditAccountUnitId}
           onBillable={setEditBillable}
+          onOtAvailable={setEditOtAvailable}
           onAllottedHours={setEditAllottedHours}
+          onWorkflowStatus={setEditWorkflowStatus}
           onIhDate={setEditIhDate}
           onClose={() => setEditing(null)}
           onSave={saveEdit}
+          onCopy={() => setCopying(true)}
           onComplete={() => setConfirm({ project: editing, action: "complete" })}
           onCancelProject={() => setConfirm({ project: editing, action: "cancelled" })}
+        />
+      ) : null}
+
+      {editing && copying ? (
+        <CopyProjectDialog
+          project={editing}
+          onClose={() => setCopying(false)}
+          onConfirm={copyProject}
         />
       ) : null}
 
@@ -773,10 +824,12 @@ function ProjectEditDialog({
   customerContact,
   priority,
   projectType,
-  brand,
+  brands,
   accountUnitId,
   billable,
+  otAvailable,
   allottedHours,
+  workflowStatus,
   ihDate,
   createdAt,
   assets,
@@ -792,29 +845,34 @@ function ProjectEditDialog({
   onCustomerContact,
   onPriority,
   onType,
-  onBrand,
+  onBrands,
   onAccountUnitId,
   onBillable,
+  onOtAvailable,
   onAllottedHours,
+  onWorkflowStatus,
   onIhDate,
   onClose,
   onSave,
+  onCopy,
   onComplete,
   onCancelProject,
 }: {
   name: string;
   description: string;
-  notes: string;
+  notes: ProjectNote[];
   wrikeNumber: string;
   sku: string;
   coupaNumber: string;
   customerContact: string;
   priority: ProjectPriority;
   projectType: ProjectType;
-  brand: ProjectBrand;
+  brands: ProjectBrand[];
   accountUnitId: ProjectAccountUnit;
   billable: boolean;
+  otAvailable: boolean;
   allottedHours: string;
+  workflowStatus: ProjectWorkflowStatus;
   ihDate: string;
   createdAt: string;
   assets: ProjectAsset[];
@@ -823,20 +881,23 @@ function ProjectEditDialog({
   closed: boolean;
   onName: (value: string) => void;
   onDescription: (value: string) => void;
-  onNotes: (value: string) => void;
+  onNotes: (value: ProjectNote[]) => void;
   onWrikeNumber: (value: string) => void;
   onSku: (value: string) => void;
   onCoupaNumber: (value: string) => void;
   onCustomerContact: (value: string) => void;
   onPriority: (value: ProjectPriority) => void;
   onType: (value: ProjectType) => void;
-  onBrand: (value: ProjectBrand) => void;
+  onBrands: (value: ProjectBrand[]) => void;
   onAccountUnitId: (value: ProjectAccountUnit) => void;
   onBillable: (value: boolean) => void;
+  onOtAvailable: (value: boolean) => void;
   onAllottedHours: (value: string) => void;
+  onWorkflowStatus: (value: ProjectWorkflowStatus) => void;
   onIhDate: (value: string) => void;
   onClose: () => void;
   onSave: () => void;
+  onCopy: () => void;
   onComplete: () => void;
   onCancelProject: () => void;
 }) {
@@ -866,7 +927,7 @@ function ProjectEditDialog({
         event.preventDefault();
         onClose();
       }}
-      className="m-auto max-h-[calc(100%-2rem)] w-[min(28rem,calc(100%-2rem))] overflow-y-auto rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-lg backdrop:bg-slate-900/40"
+      className="m-auto max-h-[calc(100%-2rem)] w-[min(40rem,calc(100%-2rem))] overflow-y-auto rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-lg backdrop:bg-slate-900/40"
     >
       <form
         className="flex flex-col gap-4 p-5"
@@ -876,9 +937,21 @@ function ProjectEditDialog({
         }}
       >
         <div className="flex items-start justify-between gap-3">
-          <h2 id="edit-project-title" className="text-lg font-semibold">
-            Edit project
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 id="edit-project-title" className="text-lg font-semibold">
+              Edit project
+            </h2>
+            {/* Copy sits beside the title so the action stays with the project editor. */}
+            <button
+              type="button"
+              onClick={onCopy}
+              aria-label="Copy project"
+              title="Copy project"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              <CopyIcon />
+            </button>
+          </div>
           <button type="button" onClick={onClose} aria-label="Close" className="text-xl leading-none text-slate-500">
             ×
           </button>
@@ -896,10 +969,12 @@ function ProjectEditDialog({
           customerContact={customerContact}
           priority={priority}
           projectType={projectType}
-          brand={brand}
+          brands={brands}
           accountUnitId={accountUnitId}
           billable={billable}
+          otAvailable={otAvailable}
           allottedHours={allottedHours}
+          workflowStatus={workflowStatus}
           ihDate={ihDate}
           ihDateLabel="IH date"
           createdAt={createdAt}
@@ -914,10 +989,12 @@ function ProjectEditDialog({
           onCustomerContact={onCustomerContact}
           onPriority={onPriority}
           onType={onType}
-          onBrand={onBrand}
+          onBrands={onBrands}
           onAccountUnitId={onAccountUnitId}
           onBillable={onBillable}
+          onOtAvailable={onOtAvailable}
           onAllottedHours={onAllottedHours}
+          onWorkflowStatus={onWorkflowStatus}
           onIhDate={onIhDate}
         />
         {error ? <p className="text-sm text-red-700">{error}</p> : null}
@@ -1033,10 +1110,12 @@ function ProjectFormFields({
   customerContact,
   priority,
   projectType,
-  brand,
+  brands,
   accountUnitId,
   billable,
+  otAvailable,
   allottedHours,
+  workflowStatus,
   ihDate,
   ihDateLabel,
   createdAt,
@@ -1051,10 +1130,12 @@ function ProjectFormFields({
   onCustomerContact,
   onPriority,
   onType,
-  onBrand,
+  onBrands,
   onAccountUnitId,
   onBillable,
+  onOtAvailable,
   onAllottedHours,
+  onWorkflowStatus,
   onIhDate,
 }: {
   idPrefix: string;
@@ -1062,17 +1143,19 @@ function ProjectFormFields({
   onTab: (tab: ProjectFormTab) => void;
   name: string;
   description: string;
-  notes: string;
+  notes: ProjectNote[];
   wrikeNumber: string;
   sku: string;
   coupaNumber: string;
   customerContact: string;
   priority: ProjectPriority;
   projectType: ProjectType;
-  brand: ProjectBrand;
+  brands: ProjectBrand[];
   accountUnitId: ProjectAccountUnit;
   billable: boolean;
+  otAvailable: boolean;
   allottedHours: string;
+  workflowStatus: ProjectWorkflowStatus;
   ihDate: string;
   ihDateLabel: string;
   createdAt: string;
@@ -1080,17 +1163,19 @@ function ProjectFormFields({
   onAssets: (assets: ProjectAsset[]) => void;
   onName: (value: string) => void;
   onDescription: (value: string) => void;
-  onNotes: (value: string) => void;
+  onNotes: (value: ProjectNote[]) => void;
   onWrikeNumber: (value: string) => void;
   onSku: (value: string) => void;
   onCoupaNumber: (value: string) => void;
   onCustomerContact: (value: string) => void;
   onPriority: (value: ProjectPriority) => void;
   onType: (value: ProjectType) => void;
-  onBrand: (value: ProjectBrand) => void;
+  onBrands: (value: ProjectBrand[]) => void;
   onAccountUnitId: (value: ProjectAccountUnit) => void;
   onBillable: (value: boolean) => void;
+  onOtAvailable: (value: boolean) => void;
   onAllottedHours: (value: string) => void;
+  onWorkflowStatus: (value: ProjectWorkflowStatus) => void;
   onIhDate: (value: string) => void;
 }) {
   const panelClass = "col-start-1 row-start-1 flex flex-col gap-4";
@@ -1125,120 +1210,162 @@ function ProjectFormFields({
       {/* Panels share one grid cell so the dialog height matches the taller tab. */}
       <div className="relative grid">
         <div className={`${panelClass} ${tab === "details" ? "" : "invisible"}`} inert={tab !== "details"} aria-hidden={tab !== "details"}>
-          <p className="text-sm text-slate-600">
-            <span className="font-medium text-slate-700">Created</span>
-            <span className="mt-1 block tabular-nums">
-              {createdAt ? formatCreated(createdAt) : "Saved when the project is created"}
-            </span>
-          </p>
+          {/* Paired rows keep the dialog shorter once the form is wider. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-created`}>
+              <span className="font-medium text-slate-700">Created</span>
+              {/* Same date control as IH, read-only so create time cannot be edited. */}
+              <input
+                id={`${idPrefix}-created`}
+                type="date"
+                value={createdDateValue(createdAt)}
+                readOnly
+                tabIndex={-1}
+                className={`${inputClass} bg-slate-50 text-slate-600`}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-ih-date`}>
+              <span className="font-medium text-slate-700">{ihDateLabel}</span>
+              <input
+                id={`${idPrefix}-ih-date`}
+                type="date"
+                value={ihDate}
+                onChange={(event) => onIhDate(event.target.value)}
+                className={inputClass}
+              />
+            </label>
+          </div>
           <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-name`}>
             <span className="font-medium text-slate-700">Project name</span>
             <input id={`${idPrefix}-name`} value={name} onChange={(event) => onName(event.target.value)} className={inputClass} />
           </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-description`}>
-            <span className="font-medium text-slate-700">Description</span>
-            <textarea
-              id={`${idPrefix}-description`}
-              value={description}
-              onChange={(event) => onDescription(event.target.value)}
-              rows={3}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-sku`}>
-            <span className="font-medium text-slate-700">SKU</span>
-            <input id={`${idPrefix}-sku`} value={sku} onChange={(event) => onSku(event.target.value)} className={inputClass} />
-          </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-contact`}>
-            <span className="font-medium text-slate-700">Customer Contact</span>
-            <input
-              id={`${idPrefix}-contact`}
-              value={customerContact}
-              onChange={(event) => onCustomerContact(event.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <PriorityField id={`${idPrefix}-priority`} value={priority} onChange={onPriority} />
-          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-ih-date`}>
-            <span className="font-medium text-slate-700">{ihDateLabel}</span>
-            <input
-              id={`${idPrefix}-ih-date`}
-              type="date"
-              value={ihDate}
-              onChange={(event) => onIhDate(event.target.value)}
-              className={inputClass}
-            />
-          </label>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-sku`}>
+              <span className="font-medium text-slate-700">SKU</span>
+              <input id={`${idPrefix}-sku`} value={sku} onChange={(event) => onSku(event.target.value)} className={inputClass} />
+            </label>
+            <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-contact`}>
+              <span className="font-medium text-slate-700">Customer Contact</span>
+              <input
+                id={`${idPrefix}-contact`}
+                value={customerContact}
+                onChange={(event) => onCustomerContact(event.target.value)}
+                className={inputClass}
+              />
+            </label>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <PriorityField id={`${idPrefix}-priority`} value={priority} onChange={onPriority} />
+            <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-status`}>
+              <span className="font-medium text-slate-700">Status</span>
+              <select
+                id={`${idPrefix}-status`}
+                value={workflowStatus}
+                onChange={(event) => onWorkflowStatus(event.target.value as ProjectWorkflowStatus)}
+                className={inputClass}
+              >
+                {PROJECT_WORKFLOW_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {PROJECT_WORKFLOW_STATUS_LABELS[status]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <DescriptionField id={`${idPrefix}-description`} value={description} onChange={onDescription} />
         </div>
         <div
           className={`${panelClass} ${tab === "billing" ? "" : "invisible"}`}
           inert={tab !== "billing"}
           aria-hidden={tab !== "billing"}
         >
-          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-billable`}>
-            <span className="font-medium text-slate-700">Billable</span>
-            <select
-              id={`${idPrefix}-billable`}
-              value={billable ? "true" : "false"}
-              onChange={(event) => onBillable(event.target.value === "true")}
-              className={inputClass}
-            >
-              <option value="true">True</option>
-              <option value="false">False</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-wrike`}>
-            <span className="font-medium text-slate-700">Wrike #</span>
-            <input
-              id={`${idPrefix}-wrike`}
-              value={wrikeNumber}
-              onChange={(event) => onWrikeNumber(event.target.value)}
-              className={inputClass}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-billable`}>
+              <span className="font-medium text-slate-700">Billable</span>
+              <select
+                id={`${idPrefix}-billable`}
+                value={billable ? "true" : "false"}
+                onChange={(event) => onBillable(event.target.value === "true")}
+                className={inputClass}
+              >
+                <option value="true">True</option>
+                <option value="false">False</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-allotted`}>
+              <span className="font-medium text-slate-700">Allotted hours</span>
+              <input
+                id={`${idPrefix}-allotted`}
+                value={allottedHours}
+                inputMode="decimal"
+                onChange={(event) => onAllottedHours(event.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-ot`}>
+              <span className="font-medium text-slate-700">OT available</span>
+              <select
+                id={`${idPrefix}-ot`}
+                value={otAvailable ? "true" : "false"}
+                onChange={(event) => onOtAvailable(event.target.value === "true")}
+                className={inputClass}
+              >
+                <option value="true">True</option>
+                <option value="false">False</option>
+              </select>
+            </label>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-wrike`}>
+              <span className="font-medium text-slate-700">Wrike #</span>
+              <input
+                id={`${idPrefix}-wrike`}
+                value={wrikeNumber}
+                onChange={(event) => onWrikeNumber(event.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-coupa`}>
+              <span className="font-medium text-slate-700">Coupa #</span>
+              <input
+                id={`${idPrefix}-coupa`}
+                value={coupaNumber}
+                onChange={(event) => onCoupaNumber(event.target.value)}
+                className={inputClass}
+              />
+            </label>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <ChoiceField id={`${idPrefix}-type`} label="Type" value={projectType} options={PROJECT_TYPES} onChange={onType} />
+            <ChoiceField
+              id={`${idPrefix}-account-unit`}
+              label="Accounting unit"
+              value={accountUnitId}
+              options={PROJECT_ACCOUNT_UNITS}
+              onChange={onAccountUnitId}
             />
-          </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-allotted`}>
-            <span className="font-medium text-slate-700">Allotted hours</span>
-            <input
-              id={`${idPrefix}-allotted`}
-              value={allottedHours}
-              inputMode="decimal"
-              onChange={(event) => onAllottedHours(event.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor={`${idPrefix}-coupa`}>
-            <span className="font-medium text-slate-700">Coupa #</span>
-            <input
-              id={`${idPrefix}-coupa`}
-              value={coupaNumber}
-              onChange={(event) => onCoupaNumber(event.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <ChoiceField id={`${idPrefix}-type`} label="Type" value={projectType} options={PROJECT_TYPES} onChange={onType} />
-          <ChoiceField id={`${idPrefix}-brand`} label="Brand" value={brand} options={PROJECT_BRANDS} onChange={onBrand} />
-          <ChoiceField
-            id={`${idPrefix}-account-unit`}
-            label="Accounting unit"
-            value={accountUnitId}
-            options={PROJECT_ACCOUNT_UNITS}
-            onChange={onAccountUnitId}
-          />
+          </div>
+          <BrandCheckboxes id={`${idPrefix}-brand`} value={brands} onChange={onBrands} />
         </div>
         <div
           className={`${panelClass} h-full ${tab === "notes" ? "" : "invisible"}`}
           inert={tab !== "notes"}
           aria-hidden={tab !== "notes"}
         >
-          <label className="flex min-h-0 flex-1 flex-col gap-1 text-sm" htmlFor={`${idPrefix}-notes`}>
-            <span className="font-medium text-slate-700">Notes</span>
-            <textarea
-              id={`${idPrefix}-notes`}
-              value={notes}
-              onChange={(event) => onNotes(event.target.value)}
-              className="min-h-40 flex-1 resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900"
-            />
-          </label>
+          <ProjectNotesFeed
+            notes={notes}
+            onAdd={(body) =>
+              onNotes([
+                ...notes,
+                {
+                  id: crypto.randomUUID(),
+                  author: CURRENT_USER,
+                  body,
+                  createdAt: new Date().toISOString(),
+                },
+              ])
+            }
+          />
         </div>
         {/* Absolute so a long file list scrolls instead of stretching the dialog. */}
         <div
@@ -1329,11 +1456,15 @@ function ProjectAssetsPanel({
   );
 }
 
-function formatCreated(iso: string): string {
-  if (!iso) return "—";
+// YYYY-MM-DD for the read-only Created date input. Matches the IH date control.
+function createdDateValue(iso: string): string {
+  if (!iso) return "";
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" });
+  if (Number.isNaN(date.getTime())) return "";
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function ChoiceField<T extends string>({
@@ -1366,6 +1497,41 @@ function ChoiceField<T extends string>({
         ))}
       </select>
     </label>
+  );
+}
+
+// Brands can stack on one project, so this is checkboxes instead of a single select.
+function BrandCheckboxes({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: ProjectBrand[];
+  onChange: (value: ProjectBrand[]) => void;
+}) {
+  function toggle(brand: ProjectBrand) {
+    onChange(value.includes(brand) ? value.filter((item) => item !== brand) : [...value, brand]);
+  }
+
+  return (
+    <fieldset className="flex flex-col gap-2 text-sm">
+      <legend className="font-medium text-slate-700">Brand</legend>
+      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+        {PROJECT_BRANDS.map((brand) => (
+          <label key={brand} className="flex items-center gap-2 text-slate-800" htmlFor={`${id}-${brand}`}>
+            <input
+              id={`${id}-${brand}`}
+              type="checkbox"
+              checked={value.includes(brand)}
+              onChange={() => toggle(brand)}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            {brand}
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
@@ -1441,6 +1607,15 @@ function HoursIcon() {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <circle cx="12" cy="12" r="8" />
       <path d="M12 8v4.5l2.5 1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h10" strokeLinecap="round" />
     </svg>
   );
 }

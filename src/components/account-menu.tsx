@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AccountUnitsDialog } from "@/components/account-units-dialog";
+import { ArchiveDialog } from "@/components/archive-dialog";
 import { ImportDialog } from "@/components/import-dialog";
 import { ReportsDialog } from "@/components/reports-dialog";
 import { SettingsDialog } from "@/components/settings-dialog";
@@ -12,6 +13,7 @@ export function AccountMenu() {
   const [reportsOpen, setReportsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [unitsOpen, setUnitsOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -76,6 +78,16 @@ export function AccountMenu() {
             className="block w-full px-3 py-2 text-left hover:bg-slate-50"
             onClick={() => {
               setOpen(false);
+              setArchiveOpen(true);
+            }}
+          >
+            Archive
+          </button>
+          <button
+            type="button"
+            className="block w-full px-3 py-2 text-left hover:bg-slate-50"
+            onClick={() => {
+              setOpen(false);
               setSettingsOpen(true);
             }}
           >
@@ -93,6 +105,7 @@ export function AccountMenu() {
       {reportsOpen ? <ReportsDialog onClose={() => setReportsOpen(false)} /> : null}
       {importOpen ? <ImportDialog onClose={() => setImportOpen(false)} /> : null}
       {unitsOpen ? <AccountUnitsDialog onClose={() => setUnitsOpen(false)} /> : null}
+      {archiveOpen ? <ArchiveDialog onClose={() => setArchiveOpen(false)} /> : null}
       {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
     </div>
   );
