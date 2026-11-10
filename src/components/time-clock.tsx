@@ -389,11 +389,21 @@ export function TimeClock() {
       </div>
 
       <div className="h-[416px] overflow-auto">
-        <table className="w-full min-w-[64rem] border-separate border-spacing-0 text-center text-sm">
+        {/* Fixed layout keeps column widths steady when running timers show seconds. */}
+        <table className="w-full min-w-[56rem] table-fixed border-separate border-spacing-0 text-center text-sm">
+          <colgroup>
+            <col className="w-[22%]" />
+            <col className="w-[16%]" />
+            <col className="w-[10%]" />
+            <col className="w-[11%]" />
+            <col className="w-[12%]" />
+            <col className="w-[13%]" />
+            <col className="w-[8%]" />
+            <col className="w-[8%]" />
+          </colgroup>
           <thead className="text-slate-600">
             <tr>
               <th className={headerCell}>Project</th>
-              <th className={headerCell}>Wrike #</th>
               <th className={headerCell}>Customer Contact</th>
               <th className={headerCell}>Priority</th>
               <th className={headerCell}>IH Dates</th>
@@ -406,7 +416,7 @@ export function TimeClock() {
           <tbody>
             {visible.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-slate-500" colSpan={9}>
+                <td className="px-4 py-6 text-slate-500" colSpan={8}>
                   {needle ? "No projects match that search." : "No projects yet."}
                 </td>
               </tr>
@@ -420,27 +430,26 @@ export function TimeClock() {
                 const locked = project.close != null;
                 return (
                   <tr key={project.id} className="even:bg-slate-100">
-                    <td className={cell}>
+                    <td className={`${cell} truncate`}>
                       <button
                         type="button"
                         onClick={() => openEdit(project)}
-                        className="font-medium text-[#0f2c4c] underline-offset-2 hover:underline"
+                        className="max-w-full truncate font-medium text-[#0f2c4c] underline-offset-2 hover:underline"
                       >
                         {project.name}
                       </button>
                     </td>
-                    <td className={cell}>{project.wrikeNumber || "—"}</td>
-                    <td className={cell}>{project.customerContact || "—"}</td>
+                    <td className={`${cell} truncate`}>{project.customerContact || "—"}</td>
                     <td className={cell}>{priorityLabel(project.priority)}</td>
                     <td className={`${cell} tabular-nums`}>{formatSlashDate(project.ihDate)}</td>
-                    <td className={cell}>
+                    <td className={`${cell} truncate`}>
                       <StatusHover status={status} sessions={project.sessions} />
                     </td>
                     <td className={cell}>
-                      {/* Reserved second line keeps row height steady when a pause clock shows. */}
+                      {/* Fixed width reserves room for seconds so other columns do not shift while running. */}
                       <div className="flex min-h-[2.5rem] flex-col items-center justify-center tabular-nums leading-tight">
-                        <span>{formatDuration(mineMs, live)}</span>
-                        <span className="mt-0.5 block h-4 text-xs font-normal text-slate-500">
+                        <span className="inline-block w-[8.5rem]">{formatDuration(mineMs, live)}</span>
+                        <span className="mt-0.5 block h-4 w-[8.5rem] text-xs font-normal text-slate-500">
                           {mine?.pausedSince != null
                             ? formatDuration(Math.max(0, now - mine.pausedSince), true)
                             : "\u00a0"}
